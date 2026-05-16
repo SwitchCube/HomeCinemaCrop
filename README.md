@@ -146,11 +146,3 @@ This tool was created to generate a more cinematic and controlled 16:9 presentat
 This project is intended for personal home cinema use and preservation workflows.
 
 Please respect copyright laws and only use video material you legally own.
-
----
-
-# License
-
-MIT License (recommended)
-
-Feel free to modify and improve the project.
