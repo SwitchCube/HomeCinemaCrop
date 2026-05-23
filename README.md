@@ -62,28 +62,16 @@ pip install opencv-python numpy pillow
 ## Windows
 
 ```bash
-python HomeCinemaCrop_v19.py
+python HomeCinemaCrop.py
 ```
 
-or use:
-
-```bash
-start_HomeCinemaCrop_v19.bat
-```
 
 ---
 
 ## macOS / Linux
 
 ```bash
-python3 HomeCinemaCrop_v19.py
-```
-
-or use:
-
-```bash
-chmod +x start_HomeCinemaCrop_v19_mac.sh
-./start_HomeCinemaCrop_v19_mac.sh
+python3 HomeCinemaCrop.py
 ```
 
 ---
