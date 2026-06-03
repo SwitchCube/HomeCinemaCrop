@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v19 Encoder+Qualität
+HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v22 Encoder+Qualität
 
 Workflow:
 1. Datei wählen
@@ -63,17 +63,39 @@ class PreCrop:
 
 @dataclasses.dataclass
 class EncoderSettings:
-    encoder_engine: str = "CPU (x264/x265)"
-    video_codec: str = "libx265"
+    # Video / Encoder
+    video_encoder: str = "H.265 10-bit (x265)"
     preset: str = "slower"
     crf: str = "12"
     tune_grain: bool = True
+
+    # Bildgröße: Auflösungslimit und optionale Skalierung sind getrennt.
+    resolution_limit: str = "Keine"
+    limit_width: str = "3840"
+    limit_height: str = "2160"
+    scaler: str = "Keine"
+    scale_to: str = "Keine"
+    scale_width: str = "3840"
+    scale_height: str = "2160"
+
+    # Pixelformat / FPS
     pixel_format_mode: str = "Auto / Quelle"
-    output_size_mode: str = "Nativ nach Crop"
-    custom_width: str = "3840"
-    custom_height: str = "2160"
-    scale_flags: str = "lanczos"
-    fps_mode: str = "Quelle CFR erzwingen"
+    fps_choice: str = "Same as source"
+    fps_type: str = "Konstante Bildfrequenz"
+
+    # Filter nach HandBrake-Vorbild
+    detelecine: str = "Off"
+    interlace_detection: str = "Default"
+    deinterlace: str = "Off"
+    deinterlace_preset: str = "Default"
+    denoise: str = "Off"
+    chroma_smooth: str = "Off"
+    sharpen: str = "Off"
+    deblock: str = "Off"
+    colorspace_filter: str = "Off"
+    grayscale: bool = False
+
+    # Container/Streams
     copy_metadata: bool = True
     copy_chapters: bool = True
     copy_attachments: bool = True
@@ -327,25 +349,103 @@ def choose_pix_fmt(info: VideoInfo, settings: EncoderSettings) -> Optional[str]:
     return None
 
 
+RESOLUTION_PRESETS = {
+    "4320p 8K Ultra HD": (7680, 4320),
+    "2160p 4K Ultra HD": (3840, 2160),
+    "1080p HD": (1920, 1080),
+    "720p HD": (1280, 720),
+    "576p PAL SD": (720, 576),
+    "480p NTSC SD": (720, 480),
+}
+
+
+def _parse_wh_pair(width_text: str, height_text: str, label: str) -> tuple[int, int]:
+    try:
+        w = int(str(width_text).strip())
+        h = int(str(height_text).strip())
+    except ValueError as exc:
+        raise RuntimeError(f"{label}: Breite und Höhe müssen ganze Zahlen sein.") from exc
+    if w <= 0 or h <= 0:
+        raise RuntimeError(f"{label}: Breite und Höhe müssen größer als 0 sein.")
+    return w, h
+
+
+def _resolution_from_mode(mode: str, custom_w: str, custom_h: str, label: str) -> Optional[tuple[int, int]]:
+    if mode in {"", "Keine", "None"}:
+        return None
+    if mode in {"Eigene", "Benutzerdefiniert", "Custom"}:
+        return _parse_wh_pair(custom_w, custom_h, label)
+    if mode in RESOLUTION_PRESETS:
+        return RESOLUTION_PRESETS[mode]
+    raise RuntimeError(f"Unbekanntes Auflösungsprofil bei {label}: {mode}")
+
+
+def _filter_token(value: str) -> str:
+    return (value or "").strip().lower()
+
+
 def build_video_filter(base_w: int, base_h: int, ch: int, precrop: PreCrop, crop_expr: str, info: VideoInfo, settings: EncoderSettings) -> str:
     filters = [
         f"crop={base_w}:{base_h}:{precrop.left}:{precrop.top}",
         f"crop={base_w}:{ch}:0:'{crop_expr}'",
     ]
-    mode = settings.output_size_mode
-    if mode == "UHD 3840x2160 hochskalieren":
-        filters.append(f"scale=3840:2160:flags={settings.scale_flags}")
-    elif mode == "Quellgröße hochskalieren":
-        filters.append(f"scale={info.width}:{info.height}:flags={settings.scale_flags}")
-    elif mode == "Benutzerdefiniert":
-        try:
-            w = int(str(settings.custom_width).strip())
-            h = int(str(settings.custom_height).strip())
-        except ValueError as exc:
-            raise RuntimeError("Benutzerdefinierte Zielgröße muss aus ganzen Zahlen bestehen.") from exc
-        if w <= 0 or h <= 0:
-            raise RuntimeError("Benutzerdefinierte Zielgröße muss größer als 0 sein.")
-        filters.append(f"scale={w}:{h}:flags={settings.scale_flags}")
+
+    # Filter im Stil von HandBrake. Standard ist überall Off, damit UHD/HDR-Material nicht versehentlich verändert wird.
+    if _filter_token(settings.detelecine) not in {"", "off"}:
+        filters += ["fieldmatch", "decimate"]
+
+    deint = _filter_token(settings.deinterlace)
+    if deint in {"yadif"}:
+        filters.append("yadif")
+    elif deint in {"decomb", "bwdif"}:
+        filters.append("bwdif")
+
+    denoise = _filter_token(settings.denoise)
+    if denoise == "hqdn3d":
+        filters.append("hqdn3d")
+    elif denoise == "nlmeans":
+        filters.append("nlmeans")
+
+    chroma = _filter_token(settings.chroma_smooth)
+    if chroma not in {"", "off"}:
+        filters.append("chromanr")
+
+    sharp = _filter_token(settings.sharpen)
+    if sharp == "unsharp":
+        filters.append("unsharp")
+    elif sharp == "lapsharp":
+        # FFmpeg hat keinen direkten LapSharp-Filter wie HandBrake; unsharp ist der sichere Ersatz.
+        filters.append("unsharp=5:5:0.8:3:3:0.4")
+
+    deblock = _filter_token(settings.deblock)
+    if deblock in {"weak", "medium", "strong"}:
+        filters.append("pp=de")
+
+    colorspace = _filter_token(settings.colorspace_filter)
+    if colorspace in {"bt.709", "bt709", "rec.709", "rec709"}:
+        filters.append("colorspace=all=bt709")
+    elif colorspace in {"bt.2020", "bt2020", "rec.2020", "rec2020"}:
+        filters.append("colorspace=all=bt2020")
+
+    if settings.grayscale:
+        filters.append("format=gray")
+
+    # Auflösungslimit: nur herunterskalieren, wenn das Bild größer als das Limit ist.
+    limit = _resolution_from_mode(settings.resolution_limit, settings.limit_width, settings.limit_height, "Auflösungslimit")
+    if limit is not None:
+        lw, lh = limit
+        filters.append(
+            f"scale='if(gt(iw/{lw},ih/{lh}),min(iw\\,{lw}),-2)':"
+            f"'if(gt(iw/{lw},ih/{lh}),-2,min(ih\\,{lh}))':flags=lanczos"
+        )
+
+    # Skalierung: gezielt auf eine Zielgröße hoch-/runterskalieren.
+    scaler = settings.scaler if settings.scaler not in {"", "Keine"} else None
+    scale_to = _resolution_from_mode(settings.scale_to, settings.scale_width, settings.scale_height, "Skalierung")
+    if scaler and scale_to is not None:
+        sw, sh = scale_to
+        filters.append(f"scale={sw}:{sh}:flags={settings.scaler}")
+
     return ",".join(filters)
 
 
@@ -404,14 +504,27 @@ def render_final(source: Path, csv_path: Path, output: Path, settings: EncoderSe
     if settings.copy_chapters:
         cmd += ["-map_chapters", "0"]
 
-    use_nvenc = settings.encoder_engine == "NVIDIA NVENC (GPU)"
-    selected_codec = settings.video_codec
-    if use_nvenc:
-        selected_codec = "hevc_nvenc" if settings.video_codec == "libx265" else "h264_nvenc"
+    encoder_label = settings.video_encoder
+    encoder_map = {
+        "H.264 (x264)": "libx264",
+        "H.264 10-bit (x264)": "libx264",
+        "H.264 (NVENC)": "h264_nvenc",
+        "H.265 (x265)": "libx265",
+        "H.265 10-bit (x265)": "libx265",
+        "H.265 12-bit (x265)": "libx265",
+        "H.265 (NVENC)": "hevc_nvenc",
+        "H.265 10-bit (NVENC)": "hevc_nvenc",
+    }
+    selected_codec = encoder_map.get(encoder_label, "libx265")
+    use_nvenc = selected_codec in {"hevc_nvenc", "h264_nvenc"}
 
     cmd += ["-map", "0", "-c:v", selected_codec]
 
     pix_fmt = choose_pix_fmt(info, settings)
+    if "10-bit" in encoder_label and pix_fmt not in {"yuv420p10le", "p010le"}:
+        pix_fmt = "p010le" if use_nvenc else "yuv420p10le"
+    elif "12-bit" in encoder_label:
+        pix_fmt = "yuv420p12le"
     if use_nvenc and pix_fmt == "yuv420p10le":
         # NVENC erwartet für 10-Bit 4:2:0 normalerweise p010le.
         pix_fmt = "p010le"
@@ -441,12 +554,17 @@ def render_final(source: Path, csv_path: Path, output: Path, settings: EncoderSe
     if info.color_primaries:
         cmd += ["-color_primaries", info.color_primaries]
 
-    # Framerate sauber in den Output schreiben. Das verhindert falsche Anzeigen wie 4080 FPS.
-    fps_value = fps_fraction_for_ffmpeg(info.fps)
-    if settings.fps_mode == "Quelle CFR erzwingen" and fps_value:
-        cmd += ["-r", fps_value, "-fps_mode", "cfr"]
-    elif settings.fps_mode == "FPS Passthrough":
-        cmd += ["-fps_mode", "passthrough"]
+    # Framerate wie in HandBrake: Same as source oder explizite FPS, plus CFR/VFR.
+    if settings.fps_choice == "Same as source":
+        fps_value = fps_fraction_for_ffmpeg(info.fps)
+    else:
+        fps_value = str(settings.fps_choice)
+    if fps_value:
+        cmd += ["-r", fps_value]
+    if settings.fps_type == "Konstante Bildfrequenz":
+        cmd += ["-fps_mode", "cfr"]
+    elif settings.fps_type == "Variable Bildfrequenz":
+        cmd += ["-fps_mode", "vfr"]
 
     cmd += ["-c:a", "copy", "-c:s", "copy"]
     if settings.copy_attachments:

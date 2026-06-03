@@ -67,18 +67,38 @@ class App(tk.Tk):
         self.render_mode_var = tk.StringVar(value="frames")
         self._render_last_mode = "frames"
         self.render_limited_var = tk.BooleanVar(value=False)
-        self.encoder_engine_var = tk.StringVar(value="CPU (x264/x265)")
-        self.codec_var = tk.StringVar(value="libx265")
+        self.video_encoder_var = tk.StringVar(value="H.265 10-bit (x265)")
         self.preset_var = tk.StringVar(value="slower")
         self.crf_var = tk.StringVar(value="12")
         self.quality_preset_var = tk.StringVar(value="Quellnah / sehr hoch (CRF 12)")
         self.tune_grain_var = tk.BooleanVar(value=True)
         self.pixel_format_mode_var = tk.StringVar(value="Auto / Quelle")
-        self.output_size_mode_var = tk.StringVar(value="Nativ nach Crop")
-        self.custom_width_var = tk.StringVar(value="3840")
-        self.custom_height_var = tk.StringVar(value="2160")
-        self.scale_flags_var = tk.StringVar(value="lanczos")
-        self.fps_mode_var = tk.StringVar(value="Quelle CFR erzwingen")
+
+        # Neue HandBrake-ähnliche Struktur: Bildgröße = Auflösungslimit + Skalierung
+        self.resolution_limit_var = tk.StringVar(value="Keine")
+        self.limit_width_var = tk.StringVar(value="3840")
+        self.limit_height_var = tk.StringVar(value="2160")
+        self.scaler_var = tk.StringVar(value="Keine")
+        self.scale_to_var = tk.StringVar(value="Keine")
+        self.scale_width_var = tk.StringVar(value="3840")
+        self.scale_height_var = tk.StringVar(value="2160")
+
+        # Bildfrequenz wie HandBrake
+        self.fps_choice_var = tk.StringVar(value="Same as source")
+        self.fps_type_var = tk.StringVar(value="Konstante Bildfrequenz")
+
+        # Filter wie HandBrake
+        self.detelecine_var = tk.StringVar(value="Off")
+        self.interlace_detection_var = tk.StringVar(value="Default")
+        self.deinterlace_var = tk.StringVar(value="Off")
+        self.deinterlace_preset_var = tk.StringVar(value="Default")
+        self.denoise_var = tk.StringVar(value="Off")
+        self.chroma_smooth_var = tk.StringVar(value="Off")
+        self.sharpen_var = tk.StringVar(value="Off")
+        self.deblock_var = tk.StringVar(value="Off")
+        self.colorspace_filter_var = tk.StringVar(value="Off")
+        self.grayscale_var = tk.BooleanVar(value=False)
+
         self.copy_metadata_var = tk.BooleanVar(value=True)
         self.copy_chapters_var = tk.BooleanVar(value=True)
         self.copy_attachments_var = tk.BooleanVar(value=True)
@@ -504,6 +524,19 @@ class App(tk.Tk):
         f.columnconfigure(1, weight=1)
         f.rowconfigure(0, weight=1)
 
+        profiles = ["Keine", "4320p 8K Ultra HD", "2160p 4K Ultra HD", "1080p HD", "720p HD", "576p PAL SD", "480p NTSC SD", "Eigene"]
+        encoders = [
+            "H.264 (x264)",
+            "H.264 10-bit (x264)",
+            "H.264 (NVENC)",
+            "H.265 (x265)",
+            "H.265 10-bit (x265)",
+            "H.265 12-bit (x265)",
+            "H.265 (NVENC)",
+            "H.265 10-bit (NVENC)",
+        ]
+        fps_values = ["Same as source", "5", "10", "12", "15", "20", "23.976", "24", "25", "29.97", "30", "48", "50", "59.94", "60", "72", "75", "90", "100", "120"]
+
         left = ttk.Frame(f)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         left.columnconfigure(0, weight=1)
@@ -511,12 +544,13 @@ class App(tk.Tk):
         right = ttk.Frame(f)
         right.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
         right.columnconfigure(0, weight=1)
+        right.rowconfigure(0, weight=1)
 
+        # 1. Final-Render-Bereich bleibt wie bisher.
         range_box = ttk.LabelFrame(left, text="Final-Render-Bereich", padding=12)
         range_box.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         range_box.columnconfigure(1, weight=1)
         range_box.columnconfigure(2, weight=1)
-
         header = ttk.Frame(range_box)
         header.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 10))
         header.columnconfigure(0, weight=1)
@@ -538,114 +572,162 @@ class App(tk.Tk):
         ttk.Button(self.render_range_controls, text="Wie Vorschau-Bereich", command=self.copy_preview_range_to_render).grid(row=2, column=1, columnspan=2, sticky="ew", pady=(10, 0))
         ttk.Label(range_box, text="Ohne Haken wird der komplette Film gerendert. Zeitangaben: 125, 00:02:05 oder 00:02:05.500", style="Subtitle.TLabel").grid(row=2, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
-        quality_box = ttk.LabelFrame(left, text="Qualität / Codec", padding=12)
-        quality_box.grid(row=1, column=0, sticky="ew", pady=(0, 12))
-        for c in range(3):
-            quality_box.columnconfigure(c, weight=1)
-        ttk.Label(quality_box, text="Qualitäts-Vorlage").grid(row=0, column=0, columnspan=3, sticky="w")
-        preset_combo = ttk.Combobox(quality_box, textvariable=self.quality_preset_var, state="readonly", values=[
-            "Normal hochwertig (CRF 16)",
-            "Quellnah / sehr hoch (CRF 12)",
-            "Nahezu verlustfrei (CRF 10)",
-            "Extrem groß / Test (CRF 8)",
-            "Benutzerdefiniert",
-        ])
-        preset_combo.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(2, 8))
-        preset_combo.bind("<<ComboboxSelected>>", lambda _event: self.on_quality_preset_changed())
+        # 2. Bildgröße: Auflösungslimit + Skalierung.
+        size_box = ttk.LabelFrame(left, text="Bildgröße", padding=12)
+        size_box.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        for c in range(6):
+            size_box.columnconfigure(c, weight=1 if c in (1, 3, 5) else 0)
 
-        ttk.Label(quality_box, text=self._t("Encoder")).grid(row=2, column=0, sticky="w")
-        ttk.Combobox(quality_box, textvariable=self.encoder_engine_var, values=["CPU (x264/x265)", "NVIDIA NVENC (GPU)"], state="readonly", width=18).grid(row=3, column=0, sticky="ew", padx=(0, 8), pady=(2, 0))
-        ttk.Label(quality_box, text="Codec").grid(row=2, column=1, sticky="w")
-        ttk.Combobox(quality_box, textvariable=self.codec_var, values=["libx265", "libx264"], state="readonly", width=14).grid(row=3, column=1, sticky="ew", padx=(0, 8), pady=(2, 0))
-        ttk.Label(quality_box, text="Preset").grid(row=4, column=0, sticky="w", pady=(8, 0))
-        ttk.Combobox(quality_box, textvariable=self.preset_var, values=["ultrafast", "fast", "medium", "slow", "slower", "veryslow"], width=14).grid(row=5, column=0, sticky="ew", padx=(0, 8), pady=(2, 0))
-        ttk.Label(quality_box, text="CRF / CQ Qualität").grid(row=4, column=1, sticky="w", pady=(8, 0))
-        ttk.Entry(quality_box, textvariable=self.crf_var, width=10).grid(row=5, column=1, sticky="ew", pady=(2, 0))
-        ttk.Checkbutton(quality_box, text="Film-/Grain-schonend encodieren (-tune grain, weniger Glättung)", variable=self.tune_grain_var).grid(row=6, column=0, columnspan=3, sticky="w", pady=(10, 0))
-        ttk.Label(quality_box, text="Kleiner CRF = bessere Qualität und größere Datei. Für UHD/HDR: libx265, slower/veryslow, CRF 10–12.", style="Subtitle.TLabel").grid(row=7, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Label(size_box, text="Auflösungslimit:").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 6))
+        self.resolution_limit_combo = ttk.Combobox(size_box, textvariable=self.resolution_limit_var, values=profiles, state="readonly", width=20)
+        self.resolution_limit_combo.grid(row=0, column=1, sticky="ew", pady=(0, 6))
+        self.limit_width_entry = ttk.Entry(size_box, textvariable=self.limit_width_var, width=8)
+        self.limit_width_entry.grid(row=0, column=2, sticky="ew", padx=(10, 4), pady=(0, 6))
+        ttk.Label(size_box, text="x").grid(row=0, column=3, sticky="w", pady=(0, 6))
+        self.limit_height_entry = ttk.Entry(size_box, textvariable=self.limit_height_var, width=8)
+        self.limit_height_entry.grid(row=0, column=4, sticky="ew", padx=(4, 0), pady=(0, 6))
 
-        size_box = ttk.LabelFrame(left, text="Zielauflösung / Skalierung", padding=12)
-        size_box.grid(row=2, column=0, sticky="ew", pady=(0, 12))
-        size_box.columnconfigure(1, weight=1)
-        ttk.Label(size_box, text="Ausgabegröße").grid(row=0, column=0, sticky="w", padx=(0, 8))
-        ttk.Combobox(size_box, textvariable=self.output_size_mode_var, state="readonly", values=["Nativ nach Crop", "UHD 3840x2160 hochskalieren", "Quellgröße hochskalieren", "Benutzerdefiniert"]).grid(row=0, column=1, columnspan=3, sticky="ew")
-        ttk.Label(size_box, text="Breite").grid(row=1, column=0, sticky="w", pady=(8, 0))
-        ttk.Entry(size_box, textvariable=self.custom_width_var, width=10).grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=(8, 0))
-        ttk.Label(size_box, text="Höhe").grid(row=1, column=2, sticky="w", pady=(8, 0))
-        ttk.Entry(size_box, textvariable=self.custom_height_var, width=10).grid(row=1, column=3, sticky="ew", pady=(8, 0))
-        ttk.Label(size_box, text="Scaler").grid(row=2, column=0, sticky="w", pady=(8, 0))
-        ttk.Combobox(size_box, textvariable=self.scale_flags_var, values=["lanczos", "spline", "bicubic", "bilinear"], width=14).grid(row=2, column=1, sticky="ew", padx=(0, 8), pady=(8, 0))
-        ttk.Label(size_box, text="Nativ = keine künstliche Hochskalierung. UHD-Modus macht aus z.B. 2880x1620 wieder 3840x2160.", style="Subtitle.TLabel").grid(row=3, column=0, columnspan=4, sticky="w", pady=(8, 0))
+        ttk.Label(size_box, text="Skalierung:").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
+        self.scaler_combo = ttk.Combobox(size_box, textvariable=self.scaler_var, values=["Keine", "lanczos", "spline", "bicubic", "bilinear"], state="readonly", width=20)
+        self.scaler_combo.grid(row=1, column=1, sticky="ew", pady=(6, 0))
+        self.scale_to_combo = ttk.Combobox(size_box, textvariable=self.scale_to_var, values=profiles, state="readonly", width=20)
+        self.scale_to_combo.grid(row=1, column=2, columnspan=2, sticky="ew", padx=(10, 4), pady=(6, 0))
+        self.scale_width_entry = ttk.Entry(size_box, textvariable=self.scale_width_var, width=8)
+        self.scale_width_entry.grid(row=1, column=4, sticky="ew", padx=(4, 4), pady=(6, 0))
+        self.scale_height_entry = ttk.Entry(size_box, textvariable=self.scale_height_var, width=8)
+        self.scale_height_entry.grid(row=1, column=5, sticky="ew", padx=(4, 0), pady=(6, 0))
+        ttk.Label(size_box, text="Limit begrenzt nur die Maximalgröße. Skalierung rechnet gezielt auf das gewählte Zielprofil.", style="Subtitle.TLabel").grid(row=2, column=0, columnspan=6, sticky="w", pady=(10, 0))
 
-        action_box = ttk.LabelFrame(left, text="Start", padding=12)
-        action_box.grid(row=3, column=0, sticky="ew")
-        action_box.columnconfigure(0, weight=1)
-        ttk.Button(action_box, text="Final-Render starten", style="Big.TButton", command=self.run_render).grid(row=0, column=0, sticky="ew")
-        ttk.Label(action_box, text="Audio, Untertitel, Kapitel, Metadaten und Anhänge werden auf Wunsch kopiert.", style="Subtitle.TLabel").grid(row=1, column=0, sticky="w", pady=(10, 0))
+        self.resolution_limit_combo.bind("<<ComboboxSelected>>", lambda _event: self.on_size_options_changed())
+        self.scaler_combo.bind("<<ComboboxSelected>>", lambda _event: self.on_size_options_changed())
+        self.scale_to_combo.bind("<<ComboboxSelected>>", lambda _event: self.on_size_options_changed())
 
-        tech_box = ttk.LabelFrame(right, text="Erweiterte Encoder-Einstellungen", padding=12)
-        tech_box.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        tech_box.columnconfigure(1, weight=1)
-        ttk.Label(tech_box, text="Pixelformat").grid(row=0, column=0, sticky="w", padx=(0, 8))
-        ttk.Combobox(tech_box, textvariable=self.pixel_format_mode_var, state="readonly", values=["Auto / Quelle", "Quelle exakt", "10 Bit 4:2:0 (HDR/UHD)", "8 Bit 4:2:0 (SDR)"]).grid(row=0, column=1, sticky="ew")
-        ttk.Label(tech_box, text="Framerate").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(8, 0))
-        ttk.Combobox(tech_box, textvariable=self.fps_mode_var, state="readonly", values=["Quelle CFR erzwingen", "FPS Passthrough", "Nicht anfassen"]).grid(row=1, column=1, sticky="ew", pady=(8, 0))
-        ttk.Checkbutton(tech_box, text="Metadaten übernehmen (-map_metadata 0)", variable=self.copy_metadata_var).grid(row=2, column=0, columnspan=2, sticky="w", pady=(10, 0))
-        ttk.Checkbutton(tech_box, text="Kapitel übernehmen (-map_chapters 0)", variable=self.copy_chapters_var).grid(row=3, column=0, columnspan=2, sticky="w")
-        ttk.Checkbutton(tech_box, text="Anhänge/Fonts übernehmen (-c:t copy)", variable=self.copy_attachments_var).grid(row=4, column=0, columnspan=2, sticky="w")
-        ttk.Label(tech_box, text="x265 Zusatzparameter").grid(row=5, column=0, sticky="w", pady=(10, 0))
-        ttk.Entry(tech_box, textvariable=self.x265_extra_params_var).grid(row=5, column=1, sticky="ew", pady=(10, 0))
-        ttk.Label(tech_box, text="z.B. aq-mode=3:aq-strength=0.9. Wird an -x265-params angehängt.", style="Subtitle.TLabel").grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        ttk.Label(tech_box, text="FFmpeg Zusatzargumente").grid(row=7, column=0, sticky="w", pady=(10, 0))
-        ttk.Entry(tech_box, textvariable=self.ffmpeg_extra_args_var).grid(row=7, column=1, sticky="ew", pady=(10, 0))
-        ttk.Label(tech_box, text="z.B. -movflags +faststart. Vorsicht: nur nutzen, wenn du weißt, was du setzt.", style="Subtitle.TLabel").grid(row=8, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        # 3. Video.
+        video_box = ttk.LabelFrame(left, text="Video", padding=12)
+        video_box.grid(row=2, column=0, sticky="ew", pady=(0, 12))
+        for c in range(4):
+            video_box.columnconfigure(c, weight=1)
+        ttk.Label(video_box, text="Videoencoder").grid(row=0, column=0, sticky="w")
+        ttk.Combobox(video_box, textvariable=self.video_encoder_var, values=encoders, state="readonly").grid(row=1, column=0, columnspan=2, sticky="ew", padx=(0, 8), pady=(2, 8))
+        ttk.Label(video_box, text="Preset").grid(row=0, column=2, sticky="w")
+        ttk.Combobox(video_box, textvariable=self.preset_var, values=["ultrafast", "fast", "medium", "slow", "slower", "veryslow"], width=14).grid(row=1, column=2, sticky="ew", padx=(0, 8), pady=(2, 8))
+        ttk.Label(video_box, text="CQ Qualität").grid(row=0, column=3, sticky="w")
+        ttk.Entry(video_box, textvariable=self.crf_var, width=10).grid(row=1, column=3, sticky="ew", pady=(2, 8))
 
-        info_box = ttk.LabelFrame(right, text="Empfehlung für deine UHD-HDR-Quelle", padding=12)
-        info_box.grid(row=1, column=0, sticky="ew")
-        ttk.Label(info_box, text="Für maximale Quellnähe: Nativ nach Crop, libx265, veryslow/slower, CRF 10–12, 10 Bit Auto, Quelle CFR erzwingen.", style="Subtitle.TLabel", wraplength=520).pack(anchor="w")
-        ttk.Label(info_box, text="Für UHD-kompatible Ausgabe: UHD 3840x2160 hochskalieren mit lanczos oder spline.", style="Subtitle.TLabel", wraplength=520).pack(anchor="w", pady=(8, 0))
+        ttk.Label(video_box, text="Bildfrequenz (BpS)").grid(row=2, column=0, sticky="w")
+        ttk.Combobox(video_box, textvariable=self.fps_choice_var, values=fps_values, state="readonly").grid(row=3, column=0, sticky="ew", padx=(0, 8), pady=(2, 8))
+        ttk.Radiobutton(video_box, text="Konstante Bildfrequenz", variable=self.fps_type_var, value="Konstante Bildfrequenz").grid(row=3, column=1, sticky="w", padx=(0, 8))
+        ttk.Radiobutton(video_box, text="Variable Bildfrequenz", variable=self.fps_type_var, value="Variable Bildfrequenz").grid(row=3, column=2, sticky="w", padx=(0, 8))
+        ttk.Checkbutton(video_box, text="Film-/Grain-schonend encodieren", variable=self.tune_grain_var).grid(row=4, column=0, columnspan=4, sticky="w", pady=(4, 0))
+
+        # 4. Filter rechts wie HandBrake.
+        filter_box = ttk.LabelFrame(right, text="Filter", padding=12)
+        filter_box.grid(row=0, column=0, sticky="nsew", pady=(0, 12))
+        filter_box.columnconfigure(1, weight=1)
+        filter_box.columnconfigure(3, weight=1)
+        def combo_row(row, label, var, values, col=0, width=18):
+            ttk.Label(filter_box, text=label).grid(row=row, column=col, sticky="w", padx=(0, 8), pady=(0, 8))
+            cb = ttk.Combobox(filter_box, textvariable=var, values=values, state="readonly", width=width)
+            cb.grid(row=row, column=col+1, sticky="ew", pady=(0, 8))
+            return cb
+        combo_row(0, "Detelecine:", self.detelecine_var, ["Off", "Default"])
+        combo_row(1, "Interlace-Erkennung:", self.interlace_detection_var, ["Off", "Default", "Less Sensitive", "More Sensitive"])
+        combo_row(2, "Deinterlace:", self.deinterlace_var, ["Off", "Decomb", "Yadif", "BWDIF"])
+        combo_row(2, "Voreinstellung:", self.deinterlace_preset_var, ["Default", "Fast", "Bob", "EEDI2"], col=2)
+        combo_row(3, "Entrauschen:", self.denoise_var, ["Off", "NLMeans", "HQDN3D"])
+        combo_row(4, "Chroma-Glättung:", self.chroma_smooth_var, ["Off", "Weak", "Medium", "Strong"])
+        combo_row(5, "Schärfen:", self.sharpen_var, ["Off", "Unsharp", "Lapsharp"])
+        combo_row(6, "Deblock:", self.deblock_var, ["Off", "Weak", "Medium", "Strong"])
+        combo_row(7, "Farbraum:", self.colorspace_filter_var, ["Off", "BT.709", "BT.2020"])
+        ttk.Checkbutton(filter_box, text="Graustufen", variable=self.grayscale_var).grid(row=8, column=1, sticky="w", pady=(6, 0))
+        ttk.Label(filter_box, text="Für 4K/HDR-Quellen am besten alles auf Off lassen, außer du möchtest bewusst filtern.", style="Subtitle.TLabel", wraplength=520).grid(row=9, column=0, columnspan=4, sticky="w", pady=(14, 0))
+
+        # 5. Start: vorhandene Optionen behalten.
+        start_box = ttk.LabelFrame(right, text="Start", padding=12)
+        start_box.grid(row=1, column=0, sticky="ew")
+        start_box.columnconfigure(1, weight=1)
+        ttk.Checkbutton(start_box, text="Metadaten übernehmen (-map_metadata 0)", variable=self.copy_metadata_var).grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Checkbutton(start_box, text="Kapitel übernehmen (-map_chapters 0)", variable=self.copy_chapters_var).grid(row=1, column=0, columnspan=2, sticky="w")
+        ttk.Checkbutton(start_box, text="Anhänge/Fonts übernehmen (-c:t copy)", variable=self.copy_attachments_var).grid(row=2, column=0, columnspan=2, sticky="w")
+        ttk.Label(start_box, text="Pixelformat").grid(row=3, column=0, sticky="w", padx=(0, 8), pady=(10, 0))
+        ttk.Combobox(start_box, textvariable=self.pixel_format_mode_var, state="readonly", values=["Auto / Quelle", "Quelle exakt", "10 Bit 4:2:0 (HDR/UHD)", "8 Bit 4:2:0 (SDR)"]).grid(row=3, column=1, sticky="ew", pady=(10, 0))
+        ttk.Label(start_box, text="x265 Zusatzparameter").grid(row=4, column=0, sticky="w", pady=(10, 0))
+        ttk.Entry(start_box, textvariable=self.x265_extra_params_var).grid(row=4, column=1, sticky="ew", pady=(10, 0))
+        ttk.Label(start_box, text="FFmpeg Zusatzargumente").grid(row=5, column=0, sticky="w", pady=(10, 0))
+        ttk.Entry(start_box, textvariable=self.ffmpeg_extra_args_var).grid(row=5, column=1, sticky="ew", pady=(10, 0))
+        ttk.Button(start_box, text="Final-Render starten", style="Big.TButton", command=self.run_render).grid(row=6, column=0, columnspan=2, sticky="ew", pady=(18, 0))
 
         self.on_render_limited_changed()
-        self.on_quality_preset_changed()
+        self.on_size_options_changed()
 
     def on_quality_preset_changed(self):
+        # Die Vorlage bleibt für alte Workflows erhalten, auch wenn sie in der neuen Oberfläche nicht prominent angezeigt wird.
         preset = self.quality_preset_var.get()
         if preset == "Normal hochwertig (CRF 16)":
-            self.codec_var.set("libx265")
+            self.video_encoder_var.set("H.265 (x265)")
             self.preset_var.set("slow")
             self.crf_var.set("16")
         elif preset == "Quellnah / sehr hoch (CRF 12)":
-            self.codec_var.set("libx265")
+            self.video_encoder_var.set("H.265 10-bit (x265)")
             self.preset_var.set("slower")
             self.crf_var.set("12")
         elif preset == "Nahezu verlustfrei (CRF 10)":
-            self.codec_var.set("libx265")
+            self.video_encoder_var.set("H.265 10-bit (x265)")
             self.preset_var.set("veryslow")
             self.crf_var.set("10")
         elif preset == "Extrem groß / Test (CRF 8)":
-            self.codec_var.set("libx265")
+            self.video_encoder_var.set("H.265 10-bit (x265)")
             self.preset_var.set("veryslow")
             self.crf_var.set("8")
+
+    def on_size_options_changed(self):
+        limit_custom = self.resolution_limit_var.get() == "Eigene"
+        for widget in (getattr(self, "limit_width_entry", None), getattr(self, "limit_height_entry", None)):
+            if widget is not None:
+                widget.configure(state="normal" if limit_custom else "disabled")
+
+        scaler_enabled = self.scaler_var.get() != "Keine"
+        scale_custom = scaler_enabled and self.scale_to_var.get() == "Eigene"
+        if getattr(self, "scale_to_combo", None) is not None:
+            self.scale_to_combo.configure(state="readonly" if scaler_enabled else "disabled")
+        for widget in (getattr(self, "scale_width_entry", None), getattr(self, "scale_height_entry", None)):
+            if widget is not None:
+                widget.configure(state="normal" if scale_custom else "disabled")
+        if not scaler_enabled:
+            self.scale_to_var.set("Keine")
 
     def _collect_encoder_settings(self) -> EncoderSettings:
         try:
             crf_value = float(str(self.crf_var.get()).replace(",", "."))
         except ValueError as exc:
-            raise RuntimeError("CRF muss eine Zahl sein, z.B. 12 oder 14.5.") from exc
+            raise RuntimeError("CQ/CRF muss eine Zahl sein, z.B. 12 oder 14.5.") from exc
         if crf_value < 0 or crf_value > 51:
-            raise RuntimeError("CRF sollte zwischen 0 und 51 liegen. Für hohe Qualität meist 8–16.")
+            raise RuntimeError("CQ/CRF sollte zwischen 0 und 51 liegen. Für hohe Qualität meist 8–16.")
         return EncoderSettings(
-            encoder_engine=self.encoder_engine_var.get(),
-            video_codec=self.codec_var.get(),
+            video_encoder=self.video_encoder_var.get(),
             preset=self.preset_var.get(),
             crf=str(self.crf_var.get()).replace(",", "."),
             tune_grain=bool(self.tune_grain_var.get()),
+            resolution_limit=self.resolution_limit_var.get(),
+            limit_width=self.limit_width_var.get(),
+            limit_height=self.limit_height_var.get(),
+            scaler=self.scaler_var.get(),
+            scale_to=self.scale_to_var.get(),
+            scale_width=self.scale_width_var.get(),
+            scale_height=self.scale_height_var.get(),
             pixel_format_mode=self.pixel_format_mode_var.get(),
-            output_size_mode=self.output_size_mode_var.get(),
-            custom_width=self.custom_width_var.get(),
-            custom_height=self.custom_height_var.get(),
-            scale_flags=self.scale_flags_var.get(),
-            fps_mode=self.fps_mode_var.get(),
+            fps_choice=self.fps_choice_var.get(),
+            fps_type=self.fps_type_var.get(),
+            detelecine=self.detelecine_var.get(),
+            interlace_detection=self.interlace_detection_var.get(),
+            deinterlace=self.deinterlace_var.get(),
+            deinterlace_preset=self.deinterlace_preset_var.get(),
+            denoise=self.denoise_var.get(),
+            chroma_smooth=self.chroma_smooth_var.get(),
+            sharpen=self.sharpen_var.get(),
+            deblock=self.deblock_var.get(),
+            colorspace_filter=self.colorspace_filter_var.get(),
+            grayscale=bool(self.grayscale_var.get()),
             copy_metadata=bool(self.copy_metadata_var.get()),
             copy_chapters=bool(self.copy_chapters_var.get()),
             copy_attachments=bool(self.copy_attachments_var.get()),
