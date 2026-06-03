@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v22 Encoder+Qualität
+HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v24 Encoder+Qualität
 
 Workflow:
 1. Datei wählen
