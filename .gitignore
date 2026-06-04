@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# HomeCinemaCrop Logs
+last_ffmpeg_command.txt
+last_ffmpeg_error.log
+last_app_error.log
+*.log
+
+# Automatisch erzeugte Projekt-/Ausgabedateien
+*_crop.csv
+*_preview.mp4
+*_16x9.mkv
+
+# Große Video-Ausgaben allgemein
+*.mkv
+*.mp4
+*.mov
+*.avi
+*.ts

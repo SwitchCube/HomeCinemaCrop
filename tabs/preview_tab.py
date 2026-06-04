@@ -310,7 +310,8 @@ def _parse_range_value(self, value: str, mode: str) -> Optional[int]:
     if not value:
         return None
     fps = self.video_info.fps if self.video_info else 0
-    if mode == "frames":
+    # Schutz: Wenn im Frames-Modus versehentlich 00:00:00 steht, behandeln wir es als Zeitangabe statt abzustürzen.
+    if mode == "frames" and ":" not in value:
         return int(value)
     seconds = self._parse_time_seconds(value)
     if fps <= 0:

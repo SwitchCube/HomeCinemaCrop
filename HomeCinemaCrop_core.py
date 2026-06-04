@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v24 Encoder+Qualität
+HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v31 Kompaktere Oberfläche
 
 Workflow:
 1. Datei wählen
@@ -16,7 +16,9 @@ import csv
 import dataclasses
 import json
 import re
+import shlex
 import subprocess
+import sys
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -35,6 +37,31 @@ try:
 except Exception:
     Image = None
     ImageTk = None
+
+
+def app_base_dir() -> Path:
+    """Ordner, in dem Diagnose-Dateien abgelegt werden.
+
+    Bei normalem Python ist das der Skriptordner. Bei einer späteren EXE ist es
+    der Ordner der EXE. So findest du die Logs immer neben dem gestarteten Tool.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def write_text_log(filename: str, text: str) -> Path:
+    path = app_base_dir() / filename
+    path.write_text(text, encoding="utf-8", errors="replace")
+    return path
+
+
+def format_command_for_log(cmd: list[str]) -> str:
+    try:
+        return shlex.join([str(part) for part in cmd])
+    except Exception:
+        return " ".join(str(part) for part in cmd)
+
 
 POSITIONS = ("up", "center", "down")
 POSITION_TO_INDEX = {name: index for index, name in enumerate(POSITIONS)}
@@ -85,14 +112,35 @@ class EncoderSettings:
 
     # Filter nach HandBrake-Vorbild
     detelecine: str = "Off"
+    detelecine_custom: str = ""
     interlace_detection: str = "Default"
+    comb_detect: str = "Off"
+    comb_detect_custom: str = ""
     deinterlace: str = "Off"
     deinterlace_preset: str = "Default"
+    deinterlace_custom: str = ""
     denoise: str = "Off"
+    denoise_preset: str = "Medium"
+    denoise_tune: str = "None"
+    denoise_custom: str = ""
     chroma_smooth: str = "Off"
+    chroma_smooth_preset: str = "Medium"
+    chroma_smooth_tune: str = "None"
+    chroma_smooth_custom: str = ""
     sharpen: str = "Off"
+    sharpen_preset: str = "Medium"
+    sharpen_tune: str = "None"
+    sharpen_custom: str = ""
     deblock: str = "Off"
+    deblock_preset: str = "Medium"
+    deblock_tune: str = "Medium"
+    deblock_custom: str = ""
+    rotate: str = "Off"
+    rotate_custom: str = ""
+    pad: str = "Off"
+    pad_custom: str = ""
     colorspace_filter: str = "Off"
+    colorspace_custom: str = ""
     grayscale: bool = False
 
     # Container/Streams
@@ -384,6 +432,39 @@ def _filter_token(value: str) -> str:
     return (value or "").strip().lower()
 
 
+def _custom_or_empty(value: str) -> str:
+    return (value or "").strip()
+
+
+def _hb_strength_to_float(value: str, default: float = 0.8) -> float:
+    token = _filter_token(value).replace(" ", "-")
+    return {
+        "ultra-light": 0.25,
+        "light": 0.45,
+        "medium": 0.75,
+        "strong": 1.0,
+        "stronger": 1.25,
+        "very-strong": 1.5,
+    }.get(token, default)
+
+
+def _hb_denoise_strength(value: str) -> str:
+    token = _filter_token(value).replace(" ", "-")
+    return {
+        "ultra-light": "1.5:1.5:4:4",
+        "light": "2:2:6:6",
+        "medium": "3:3:8:8",
+        "strong": "4:4:10:10",
+        "stronger": "6:6:12:12",
+        "very-strong": "8:8:16:16",
+    }.get(token, "3:3:8:8")
+
+
+def _append_custom_or_default(filters: list[str], custom_value: str, default_filter: str):
+    custom = _custom_or_empty(custom_value)
+    filters.append(custom if custom else default_filter)
+
+
 def build_video_filter(base_w: int, base_h: int, ch: int, precrop: PreCrop, crop_expr: str, info: VideoInfo, settings: EncoderSettings) -> str:
     filters = [
         f"crop={base_w}:{base_h}:{precrop.left}:{precrop.top}",
@@ -391,41 +472,112 @@ def build_video_filter(base_w: int, base_h: int, ch: int, precrop: PreCrop, crop
     ]
 
     # Filter im Stil von HandBrake. Standard ist überall Off, damit UHD/HDR-Material nicht versehentlich verändert wird.
-    if _filter_token(settings.detelecine) not in {"", "off"}:
+    if _filter_token(settings.detelecine) == "custom":
+        _append_custom_or_default(filters, settings.detelecine_custom, "fieldmatch,decimate")
+    elif _filter_token(settings.detelecine) not in {"", "off"}:
         filters += ["fieldmatch", "decimate"]
 
+    # Comb Detect hat in FFmpeg keinen 1:1-Filter. Für Decomb wird unten bwdif/yadif verwendet.
+    # Custom erlaubt trotzdem gezielte FFmpeg-Filterketten.
+    if _filter_token(settings.comb_detect) == "custom":
+        custom = _custom_or_empty(settings.comb_detect_custom)
+        if custom:
+            filters.append(custom)
+
     deint = _filter_token(settings.deinterlace)
-    if deint in {"yadif"}:
-        filters.append("yadif")
+    deint_preset = _filter_token(settings.deinterlace_preset)
+    if deint == "custom" or deint_preset == "custom":
+        custom = _custom_or_empty(settings.deinterlace_custom)
+        if custom:
+            filters.append(custom)
+    elif deint == "yadif":
+        filters.append("yadif=mode=1" if deint_preset in {"bob"} else "yadif")
     elif deint in {"decomb", "bwdif"}:
-        filters.append("bwdif")
+        filters.append("bwdif=mode=1" if deint_preset in {"bob", "eedi2-bob", "eedi2 bob"} else "bwdif")
 
     denoise = _filter_token(settings.denoise)
-    if denoise == "hqdn3d":
-        filters.append("hqdn3d")
+    denoise_preset = _filter_token(settings.denoise_preset)
+    if denoise_preset == "custom":
+        custom = _custom_or_empty(settings.denoise_custom)
+        if custom:
+            filters.append(custom)
+    elif denoise == "hqdn3d":
+        filters.append("hqdn3d=" + _hb_denoise_strength(settings.denoise_preset))
     elif denoise == "nlmeans":
-        filters.append("nlmeans")
+        strength = _hb_strength_to_float(settings.denoise_preset, 0.8)
+        filters.append(f"nlmeans=s={strength:.2f}")
 
     chroma = _filter_token(settings.chroma_smooth)
-    if chroma not in {"", "off"}:
-        filters.append("chromanr")
+    chroma_preset = _filter_token(settings.chroma_smooth_preset)
+    if chroma_preset == "custom":
+        custom = _custom_or_empty(settings.chroma_smooth_custom)
+        if custom:
+            filters.append(custom)
+    elif chroma not in {"", "off"}:
+        strength = _hb_strength_to_float(settings.chroma_smooth_preset, 0.7)
+        filters.append(f"chromanr=thres={max(1, int(strength * 20))}")
 
     sharp = _filter_token(settings.sharpen)
-    if sharp == "unsharp":
-        filters.append("unsharp")
+    sharp_preset = _filter_token(settings.sharpen_preset)
+    if sharp_preset == "custom":
+        custom = _custom_or_empty(settings.sharpen_custom)
+        if custom:
+            filters.append(custom)
+    elif sharp == "unsharp":
+        amount = _hb_strength_to_float(settings.sharpen_preset, 0.75)
+        filters.append(f"unsharp=5:5:{amount:.2f}:3:3:{amount/2:.2f}")
     elif sharp == "lapsharp":
         # FFmpeg hat keinen direkten LapSharp-Filter wie HandBrake; unsharp ist der sichere Ersatz.
-        filters.append("unsharp=5:5:0.8:3:3:0.4")
+        amount = _hb_strength_to_float(settings.sharpen_preset, 0.8)
+        filters.append(f"unsharp=5:5:{amount:.2f}:3:3:{amount/2:.2f}")
 
     deblock = _filter_token(settings.deblock)
-    if deblock in {"weak", "medium", "strong"}:
+    deblock_preset = _filter_token(settings.deblock_preset)
+    if deblock_preset == "custom":
+        custom = _custom_or_empty(settings.deblock_custom)
+        if custom:
+            filters.append(custom)
+    elif deblock not in {"", "off"}:
         filters.append("pp=de")
 
+    rotate = _filter_token(settings.rotate)
+    if rotate == "custom":
+        custom = _custom_or_empty(settings.rotate_custom)
+        if custom:
+            filters.append(custom)
+    elif rotate == "90":
+        filters.append("transpose=1")
+    elif rotate == "180":
+        filters.append("hflip,vflip")
+    elif rotate == "270":
+        filters.append("transpose=2")
+    elif "horizontal" in rotate:
+        filters.append("hflip")
+    elif "vertikal" in rotate or "vertical" in rotate:
+        filters.append("vflip")
+
+    if _filter_token(settings.pad) == "custom":
+        custom = _custom_or_empty(settings.pad_custom)
+        if custom:
+            filters.append(custom)
+
     colorspace = _filter_token(settings.colorspace_filter)
-    if colorspace in {"bt.709", "bt709", "rec.709", "rec709"}:
-        filters.append("colorspace=all=bt709")
+    if colorspace == "custom":
+        custom = _custom_or_empty(settings.colorspace_custom)
+        if custom:
+            filters.append(custom)
+    elif colorspace in {"bt.709", "bt709", "rec.709", "rec709"}:
+        # HDR/PQ -> BT.709 braucht Tonemapping. Ein einfacher colorspace-Filter kann dabei fehlschlagen.
+        if (info.color_transfer or "").lower() in {"smpte2084", "pq"}:
+            filters.append("zscale=t=linear:npl=100,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:p=bt709")
+        else:
+            filters.append("colorspace=all=bt709")
     elif colorspace in {"bt.2020", "bt2020", "rec.2020", "rec2020"}:
         filters.append("colorspace=all=bt2020")
+    elif colorspace in {"bt.601 smpte-c", "smpte-c", "bt601 smpte-c"}:
+        filters.append("colorspace=all=smpte170m")
+    elif colorspace in {"bt.601 ebu", "ebu", "bt601 ebu"}:
+        filters.append("colorspace=all=bt470bg")
 
     if settings.grayscale:
         filters.append("format=gray")
@@ -577,19 +729,39 @@ def render_final(source: Path, csv_path: Path, output: Path, settings: EncoderSe
 
     cmd.append(str(output))
 
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, universal_newlines=True)
+    command_text = format_command_for_log(cmd)
+    command_log = write_text_log("last_ffmpeg_command.txt", command_text + "\n")
+
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, universal_newlines=True, errors="replace")
     frame_regex = re.compile(r"^frame=(\d+)$")
+    ffmpeg_lines: list[str] = []
     if process.stdout is None:
         raise RuntimeError("FFmpeg-Ausgabe konnte nicht gelesen werden.")
     for raw_line in process.stdout:
+        ffmpeg_lines.append(raw_line)
         if cancelled():
             process.terminate()
+            write_text_log("last_ffmpeg_error.log", "Abgebrochen durch Benutzer.\n\nBefehl:\n" + command_text + "\n\nAusgabe:\n" + "".join(ffmpeg_lines))
             raise Cancelled()
         match = frame_regex.match(raw_line.strip())
         if match:
             progress(min(int(match.group(1)), total_frames), total_frames, "Finales Video wird gerendert ...")
     process.wait()
+    ffmpeg_output = "".join(ffmpeg_lines)
     if process.returncode != 0:
-        raise RuntimeError(f"FFmpeg wurde mit Fehlercode {process.returncode} beendet.")
+        error_log = write_text_log(
+            "last_ffmpeg_error.log",
+            f"FFmpeg wurde mit Fehlercode {process.returncode} beendet.\n\n"
+            f"Befehl:\n{command_text}\n\n"
+            f"FFmpeg-Ausgabe:\n{ffmpeg_output}"
+        )
+        tail_lines = [line for line in ffmpeg_output.strip().splitlines() if line.strip()][-18:]
+        tail = "\n".join(tail_lines) if tail_lines else "Keine FFmpeg-Ausgabe empfangen."
+        raise RuntimeError(
+            f"FFmpeg wurde mit Fehlercode {process.returncode} beendet.\n\n"
+            f"Logdateien:\n{error_log}\n{command_log}\n\n"
+            f"Letzte FFmpeg-Meldungen:\n{tail}"
+        )
+    write_text_log("last_ffmpeg_error.log", "FFmpeg erfolgreich beendet.\n\nBefehl:\n" + command_text + "\n\nAusgabe:\n" + ffmpeg_output)
     progress(total_frames, total_frames, f"Fertig gespeichert: {output}")
 
