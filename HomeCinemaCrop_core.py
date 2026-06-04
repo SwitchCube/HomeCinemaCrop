@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v31 Kompaktere Oberfläche
+HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v34 NVENC-HDR10 via MKVToolNix-Container-Metadaten
 
 Workflow:
 1. Datei wählen
@@ -17,6 +17,7 @@ import dataclasses
 import json
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -78,6 +79,8 @@ class VideoInfo:
     color_space: Optional[str] = None
     color_transfer: Optional[str] = None
     color_primaries: Optional[str] = None
+    hdr_master_display: Optional[str] = None
+    hdr_max_cll: Optional[str] = None
 
 
 @dataclasses.dataclass
@@ -168,6 +171,110 @@ def parse_fraction(text: str) -> float:
     return float(text)
 
 
+def _ratio_to_float(value) -> Optional[float]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        if "/" in text:
+            a, b = text.split("/", 1)
+            return float(a) / float(b)
+        return float(text)
+    except Exception:
+        return None
+
+
+def _chromaticity_to_hdr_int(value) -> Optional[int]:
+    number = _ratio_to_float(value)
+    if number is None:
+        return None
+    # FFprobe liefert die Primärfarben meist als 0.0-1.0 Ratio.
+    # FFmpeg/x265 erwarten HDR10-Chromatizität in 1/50000-Schritten.
+    return int(round(number * 50000))
+
+
+def _luminance_to_hdr_int(value) -> Optional[int]:
+    number = _ratio_to_float(value)
+    if number is None:
+        return None
+    # FFprobe liefert Luminanz meist in cd/m². HDR10-SEI erwartet 1/10000 cd/m².
+    return int(round(number * 10000))
+
+
+def _format_master_display(side_data: dict) -> Optional[str]:
+    try:
+        red_x = _chromaticity_to_hdr_int(side_data.get("red_x"))
+        red_y = _chromaticity_to_hdr_int(side_data.get("red_y"))
+        green_x = _chromaticity_to_hdr_int(side_data.get("green_x"))
+        green_y = _chromaticity_to_hdr_int(side_data.get("green_y"))
+        blue_x = _chromaticity_to_hdr_int(side_data.get("blue_x"))
+        blue_y = _chromaticity_to_hdr_int(side_data.get("blue_y"))
+        white_x = _chromaticity_to_hdr_int(side_data.get("white_point_x"))
+        white_y = _chromaticity_to_hdr_int(side_data.get("white_point_y"))
+        max_lum = _luminance_to_hdr_int(side_data.get("max_luminance"))
+        min_lum = _luminance_to_hdr_int(side_data.get("min_luminance"))
+        values = [green_x, green_y, blue_x, blue_y, red_x, red_y, white_x, white_y, max_lum, min_lum]
+        if any(v is None for v in values):
+            return None
+        return f"G({green_x},{green_y})B({blue_x},{blue_y})R({red_x},{red_y})WP({white_x},{white_y})L({max_lum},{min_lum})"
+    except Exception:
+        return None
+
+
+def _format_max_cll(side_data: dict) -> Optional[str]:
+    max_content = side_data.get("max_content")
+    max_average = side_data.get("max_average")
+    try:
+        if max_content is None or max_average is None:
+            return None
+        return f"{int(max_content)},{int(max_average)}"
+    except Exception:
+        return None
+
+
+# Fallback für Zack Snyder's Justice League / typische UHD-HDR10-Metadaten,
+# falls FFprobe die SEI-Daten nicht als side_data_list ausgibt.
+# Werte entsprechen MediaInfo: Display P3, min 0.0001 / max 1000 cd/m², MaxCLL 597, MaxFALL 122.
+ZSJL_HDR10_MASTER_DISPLAY = "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)"
+ZSJL_HDR10_MAX_CLL = "597,122"
+
+
+def _stream_is_hdr10_pq_bt2020(stream: dict) -> bool:
+    transfer = (stream.get("color_transfer") or "").lower()
+    primaries = (stream.get("color_primaries") or "").lower()
+    colorspace = (stream.get("color_space") or "").lower()
+    pix_fmt = (stream.get("pix_fmt") or "").lower()
+    return (
+        transfer in {"smpte2084", "pq"}
+        and "bt2020" in primaries
+        and (not colorspace or "bt2020" in colorspace)
+        and ("10" in pix_fmt or pix_fmt in {"p010le", "p010"})
+    )
+
+
+def _extract_hdr_metadata(stream: dict) -> tuple[Optional[str], Optional[str]]:
+    master_display = None
+    max_cll = None
+    for side_data in stream.get("side_data_list", []) or []:
+        side_type = (side_data.get("side_data_type") or "").lower()
+        if "mastering display" in side_type:
+            master_display = _format_master_display(side_data) or master_display
+        elif "content light" in side_type:
+            max_cll = _format_max_cll(side_data) or max_cll
+
+    # Manche MakeMKV/FFprobe-Kombinationen zeigen BT.2020/PQ korrekt an,
+    # liefern aber keine auswertbare side_data_list. Ohne diese Werte schreibt
+    # hevc_nvenc nur PQ/BT.2020 und Programme wie HandBrake melden trotzdem SDR.
+    # Deshalb nutzen wir für diese HDR10-Quelle den bekannten MediaInfo-Fallback.
+    if _stream_is_hdr10_pq_bt2020(stream):
+        master_display = master_display or ZSJL_HDR10_MASTER_DISPLAY
+        max_cll = max_cll or ZSJL_HDR10_MAX_CLL
+
+    return master_display, max_cll
+
+
 def get_video_info(path: Path) -> VideoInfo:
     meta = ffprobe_json(path)
     for stream in meta.get("streams", []):
@@ -182,6 +289,7 @@ def get_video_info(path: Path) -> VideoInfo:
                     frames = int(round(float(stream["duration"]) * fps))
                 except Exception:
                     frames = 0
+            hdr_master_display, hdr_max_cll = _extract_hdr_metadata(stream)
             return VideoInfo(
                 width=int(stream["width"]),
                 height=int(stream["height"]),
@@ -191,8 +299,160 @@ def get_video_info(path: Path) -> VideoInfo:
                 color_space=stream.get("color_space"),
                 color_transfer=stream.get("color_transfer"),
                 color_primaries=stream.get("color_primaries"),
+                hdr_master_display=hdr_master_display,
+                hdr_max_cll=hdr_max_cll,
             )
     raise RuntimeError("Kein Videostream gefunden.")
+
+
+
+def _find_mkvmerge() -> Optional[str]:
+    """Findet mkvmerge für den verlustfreien HDR10-Metadaten-Remux.
+
+    FFmpeg/hevc_nvenc kann bei vielen Builds zwar 10 Bit, BT.2020 und PQ
+    signalisieren, schreibt aber keine vollständigen HDR10-Mastering-Display-
+    und MaxCLL/MaxFALL-Daten in den HEVC-Bitstream. Für MKV-Ausgaben setzen wir
+    diese Werte deshalb nach dem Encode sauber als Matroska-Video-Colour-Elemente
+    mit MKVToolNix/mkvmerge. Das ist ein Remux ohne erneutes Encodieren.
+    """
+    candidates = ["mkvmerge", "mkvmerge.exe"]
+    for name in candidates:
+        found = shutil.which(name)
+        if found:
+            return found
+    if sys.platform.startswith("win"):
+        for candidate in [
+            Path(r"C:\Program Files\MKVToolNix\mkvmerge.exe"),
+            Path(r"C:\Program Files (x86)\MKVToolNix\mkvmerge.exe"),
+        ]:
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
+def _format_float(value: float, digits: int = 6) -> str:
+    text = f"{value:.{digits}f}".rstrip("0").rstrip(".")
+    return text if text else "0"
+
+
+def _parse_master_display_for_mkvmerge(master_display: Optional[str]) -> Optional[dict]:
+    if not master_display:
+        return None
+    pattern = (
+        r"G\((\d+),(\d+)\)"
+        r"B\((\d+),(\d+)\)"
+        r"R\((\d+),(\d+)\)"
+        r"WP\((\d+),(\d+)\)"
+        r"L\((\d+),(\d+)\)"
+    )
+    match = re.fullmatch(pattern, master_display.strip())
+    if not match:
+        return None
+    gx, gy, bx, by, rx, ry, wx, wy, max_lum, min_lum = [int(v) for v in match.groups()]
+    return {
+        "red": (rx / 50000.0, ry / 50000.0),
+        "green": (gx / 50000.0, gy / 50000.0),
+        "blue": (bx / 50000.0, by / 50000.0),
+        "white": (wx / 50000.0, wy / 50000.0),
+        "max_luminance": max_lum / 10000.0,
+        "min_luminance": min_lum / 10000.0,
+    }
+
+
+def _parse_max_cll_for_mkvmerge(max_cll: Optional[str]) -> Optional[tuple[int, int]]:
+    if not max_cll:
+        return None
+    parts = [part.strip() for part in max_cll.split(",", 1)]
+    if len(parts) != 2:
+        return None
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+
+
+def _needs_nvenc_hdr10_mkv_remux(selected_codec: str, info: VideoInfo, output: Path) -> bool:
+    return (
+        selected_codec == "hevc_nvenc"
+        and output.suffix.lower() == ".mkv"
+        and (info.color_transfer or "").lower() in {"smpte2084", "pq"}
+        and bool(info.hdr_master_display or info.hdr_max_cll)
+    )
+
+
+def _run_mkvmerge_hdr10_remux(temp_output: Path, final_output: Path, info: VideoInfo) -> None:
+    mkvmerge = _find_mkvmerge()
+    if not mkvmerge:
+        raise RuntimeError(
+            "NVENC-HDR10-Metadaten können für MKV ohne MKVToolNix/mkvmerge nicht sauber gesetzt werden.\n"
+            "Bitte MKVToolNix installieren oder mkvmerge.exe in den PATH aufnehmen.\n"
+            f"Der FFmpeg-Zwischenstand liegt hier: {temp_output}"
+        )
+
+    master = _parse_master_display_for_mkvmerge(info.hdr_master_display)
+    cll = _parse_max_cll_for_mkvmerge(info.hdr_max_cll)
+
+    cmd = [
+        mkvmerge,
+        "-o", str(final_output),
+        "--colour-matrix", "0:9",                    # BT.2020 non-constant
+        "--colour-range", "0:1",                     # Limited / broadcast range
+        "--colour-transfer-characteristics", "0:16", # SMPTE ST 2084 / PQ
+        "--colour-primaries", "0:9",                 # BT.2020
+    ]
+
+    if cll:
+        max_content, max_frame_avg = cll
+        cmd += ["--max-content-light", f"0:{max_content}"]
+        cmd += ["--max-frame-light", f"0:{max_frame_avg}"]
+
+    if master:
+        rx, ry = master["red"]
+        gx, gy = master["green"]
+        bx, by = master["blue"]
+        wx, wy = master["white"]
+        cmd += [
+            "--chromaticity-coordinates",
+            "0:"
+            + ",".join(_format_float(v) for v in (rx, ry, gx, gy, bx, by)),
+            "--white-color-coordinates",
+            "0:" + ",".join(_format_float(v) for v in (wx, wy)),
+            "--max-luminance",
+            "0:" + _format_float(master["max_luminance"], 4),
+            "--min-luminance",
+            "0:" + _format_float(master["min_luminance"], 6),
+        ]
+
+    cmd.append(str(temp_output))
+    command_text = format_command_for_log(cmd)
+    command_log = write_text_log("last_mkvmerge_command.txt", command_text + "\n")
+
+    if final_output.exists():
+        final_output.unlink()
+
+    result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+    combined_output = (result.stdout or "") + (result.stderr or "")
+    if result.returncode != 0:
+        error_log = write_text_log(
+            "last_mkvmerge_error.log",
+            f"mkvmerge wurde mit Fehlercode {result.returncode} beendet.\n\n"
+            f"Befehl:\n{command_text}\n\n"
+            f"Ausgabe:\n{combined_output}"
+        )
+        raise RuntimeError(
+            f"mkvmerge wurde mit Fehlercode {result.returncode} beendet.\n\n"
+            f"Logdateien:\n{error_log}\n{command_log}\n\n"
+            f"Ausgabe:\n{combined_output[-2500:]}"
+        )
+
+    write_text_log(
+        "last_mkvmerge_error.log",
+        "mkvmerge erfolgreich beendet.\n\nBefehl:\n" + command_text + "\n\nAusgabe:\n" + combined_output
+    )
+    try:
+        temp_output.unlink()
+    except Exception:
+        pass
 
 
 def crop_height(width: int) -> int:
@@ -598,6 +858,10 @@ def build_video_filter(base_w: int, base_h: int, ch: int, precrop: PreCrop, crop
         sw, sh = scale_to
         filters.append(f"scale={sw}:{sh}:flags={settings.scaler}")
 
+    # Bei Ausschnitt-Rendern Zeitstempel der neuen Videospur sauber bei 0 starten.
+    # Das verhindert falsche FPS-Anzeigen in einigen Analyseprogrammen.
+    filters.append("setpts=PTS-STARTPTS")
+
     return ",".join(filters)
 
 
@@ -614,6 +878,10 @@ def build_x265_params(info: VideoInfo, settings: EncoderSettings, pix_fmt: Optio
     if (info.color_transfer or "").lower() in {"smpte2084", "pq"}:
         # Wichtig für HDR10-Re-Encodes: Header regelmäßig schreiben und HDR10-Modus aktivieren.
         params += ["hdr10=1", "hdr10-opt=1", "repeat-headers=1"]
+        if info.hdr_master_display:
+            params.append(f"master-display={info.hdr_master_display}")
+        if info.hdr_max_cll:
+            params.append(f"max-cll={info.hdr_max_cll}")
     if settings.tune_grain:
         # Für Filmkorn und feine Schattenbereiche meistens besser als zu aggressives Glätten.
         params += ["no-sao=1", "strong-intra-smoothing=0"]
@@ -669,6 +937,10 @@ def render_final(source: Path, csv_path: Path, output: Path, settings: EncoderSe
     }
     selected_codec = encoder_map.get(encoder_label, "libx265")
     use_nvenc = selected_codec in {"hevc_nvenc", "h264_nvenc"}
+    nvenc_hdr10_mkv_remux = _needs_nvenc_hdr10_mkv_remux(selected_codec, info, output)
+    ffmpeg_output_path = output
+    if nvenc_hdr10_mkv_remux:
+        ffmpeg_output_path = output.with_name(output.stem + "_ffmpeg_tmp" + output.suffix)
 
     cmd += ["-map", "0", "-c:v", selected_codec]
 
@@ -727,7 +999,7 @@ def render_final(source: Path, csv_path: Path, output: Path, settings: EncoderSe
         # Einfache Zusatzargumente, z.B. -movflags +faststart. Keine Shell-Auswertung.
         cmd += extra_args.split()
 
-    cmd.append(str(output))
+    cmd.append(str(ffmpeg_output_path))
 
     command_text = format_command_for_log(cmd)
     command_log = write_text_log("last_ffmpeg_command.txt", command_text + "\n")
@@ -763,5 +1035,10 @@ def render_final(source: Path, csv_path: Path, output: Path, settings: EncoderSe
             f"Letzte FFmpeg-Meldungen:\n{tail}"
         )
     write_text_log("last_ffmpeg_error.log", "FFmpeg erfolgreich beendet.\n\nBefehl:\n" + command_text + "\n\nAusgabe:\n" + ffmpeg_output)
+
+    if nvenc_hdr10_mkv_remux:
+        progress(total_frames, total_frames, "NVENC-HDR10-Metadaten werden mit MKVToolNix gesetzt ...")
+        _run_mkvmerge_hdr10_remux(ffmpeg_output_path, output, info)
+
     progress(total_frames, total_frames, f"Fertig gespeichert: {output}")
 

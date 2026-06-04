@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v31 Kompaktere Oberfläche
+HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v34 NVENC-HDR10 via MKVToolNix-Container-Metadaten
 
 Workflow:
 1. Datei wählen
@@ -39,7 +39,7 @@ except Exception:
 from HomeCinemaCrop_core import *
 from tabs import file_tab, precrop_tab, preview_tab, render_tab
 
-APP_VERSION = "v31"
+APP_VERSION = "v34"
 
 TRANSLATIONS_EN = {
     'Sprache': 'Language',

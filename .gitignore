@@ -7,6 +7,8 @@ __pycache__/
 last_ffmpeg_command.txt
 last_ffmpeg_error.log
 last_app_error.log
+last_mkvmerge_command.txt
+last_mkvmerge_error.log
 *.log
 
 # Automatisch erzeugte Projekt-/Ausgabedateien
@@ -20,3 +22,11 @@ last_app_error.log
 *.mov
 *.avi
 *.ts
+
+# IDE-Dateien
+.vscode/
+.idea/
+
+# Betriebssystem-Dateien
+Thumbs.db
+.DS_Store
