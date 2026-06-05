@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+# HomeCinemaCrop preview_tab v37
+
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 
 try:
-    from PIL import Image, ImageTk
+    from PIL import Image, ImageTk, ImageDraw
 except Exception:
     Image = None
     ImageTk = None
+    ImageDraw = None
 
 from HomeCinemaCrop_core import *
 
@@ -74,6 +77,179 @@ def jump_precrop_preview_frame(self, delta: int):
     self.precrop_preview_custom_frame_var.set(str(new_value))
     self.update_precrop_preview()
 
+
+def _time_parts_from_range_value(self, value: str) -> tuple[int, int, int]:
+    value = (value or "").strip().replace(",", ".")
+    if not value:
+        return 0, 0, 0
+    try:
+        if ":" in value:
+            parts = [float(part) for part in value.split(":")]
+            if len(parts) == 3:
+                total = int(round(parts[0] * 3600 + parts[1] * 60 + parts[2]))
+            elif len(parts) == 2:
+                total = int(round(parts[0] * 60 + parts[1]))
+            else:
+                total = 0
+        else:
+            total = int(round(float(value)))
+    except Exception:
+        total = 0
+    total = max(0, total)
+    hours = total // 3600
+    minutes = (total % 3600) // 60
+    seconds = total % 60
+    return hours, minutes, seconds
+
+
+def _format_time_parts_for_range(self, hours, minutes, seconds) -> str:
+    try:
+        h = max(0, int(str(hours).strip() or 0))
+    except Exception:
+        h = 0
+    try:
+        m = max(0, min(59, int(str(minutes).strip() or 0)))
+    except Exception:
+        m = 0
+    try:
+        sec = max(0, min(59, int(str(seconds).strip() or 0)))
+    except Exception:
+        sec = 0
+    return f"{h:02d}:{m:02d}:{sec:02d}"
+
+
+def _build_range_value_input(self, parent, textvariable, key: str, width: int = 18):
+    container = ttk.Frame(parent)
+    container.columnconfigure(0, weight=1)
+
+    frame_entry = ttk.Entry(container, textvariable=textvariable, width=width)
+    frame_entry.grid(row=0, column=0, sticky="ew")
+
+    time_frame = ttk.Frame(container)
+    time_frame.columnconfigure(0, weight=1)
+    time_frame.columnconfigure(2, weight=1)
+    time_frame.columnconfigure(4, weight=1)
+    hour_var = tk.StringVar(value="00")
+    minute_var = tk.StringVar(value="00")
+    second_var = tk.StringVar(value="00")
+    spin_hour = ttk.Spinbox(time_frame, from_=0, to=99, increment=1, textvariable=hour_var, width=4, format="%02.0f")
+    spin_minute = ttk.Spinbox(time_frame, from_=0, to=59, increment=1, textvariable=minute_var, width=3, format="%02.0f")
+    spin_second = ttk.Spinbox(time_frame, from_=0, to=59, increment=1, textvariable=second_var, width=3, format="%02.0f")
+    spin_hour.grid(row=0, column=0, sticky="ew")
+    ttk.Label(time_frame, text=":").grid(row=0, column=1, padx=2)
+    spin_minute.grid(row=0, column=2, sticky="ew")
+    ttk.Label(time_frame, text=":").grid(row=0, column=3, padx=2)
+    spin_second.grid(row=0, column=4, sticky="ew")
+
+    widgets = {
+        "container": container,
+        "entry": frame_entry,
+        "time_frame": time_frame,
+        "vars": (hour_var, minute_var, second_var),
+        "spins": (spin_hour, spin_minute, spin_second),
+        "textvariable": textvariable,
+        "updating": False,
+    }
+    if not hasattr(self, "_range_value_widgets"):
+        self._range_value_widgets = {}
+    self._range_value_widgets[key] = widgets
+
+    def sync_from_text(*_args):
+        if widgets["updating"]:
+            return
+        hours, minutes, seconds = self._time_parts_from_range_value(textvariable.get())
+        widgets["updating"] = True
+        hour_var.set(f"{hours:02d}")
+        minute_var.set(f"{minutes:02d}")
+        second_var.set(f"{seconds:02d}")
+        widgets["updating"] = False
+
+    def sync_to_text(*_args):
+        if widgets["updating"]:
+            return
+        widgets["updating"] = True
+        textvariable.set(self._format_time_parts_for_range(hour_var.get(), minute_var.get(), second_var.get()))
+        widgets["updating"] = False
+
+    for spin in (spin_hour, spin_minute, spin_second):
+        spin.configure(command=sync_to_text)
+        spin.bind("<FocusOut>", lambda _event: sync_to_text())
+        spin.bind("<Return>", lambda _event: sync_to_text())
+    for var in (hour_var, minute_var, second_var):
+        var.trace_add("write", lambda *_: sync_to_text())
+    textvariable.trace_add("write", sync_from_text)
+    sync_from_text()
+    return container
+
+
+def _set_range_value_input_mode(self, key: str, mode: str):
+    widgets = getattr(self, "_range_value_widgets", {}).get(key)
+    if not widgets:
+        return
+    widgets["entry"].grid_remove()
+    widgets["time_frame"].grid_remove()
+    if mode == "time":
+        # Bei leeren Feldern bleibt der eigentliche Wert leer, aber die Anzeige zeigt klar das Zeitformat.
+        if not (widgets["textvariable"].get() or "").strip():
+            widgets["updating"] = True
+            hvar, mvar, svar = widgets["vars"]
+            hvar.set("00")
+            mvar.set("00")
+            svar.set("00")
+            widgets["updating"] = False
+        widgets["time_frame"].grid(row=0, column=0, sticky="ew")
+    else:
+        widgets["entry"].grid(row=0, column=0, sticky="ew")
+
+
+def _update_range_value_input_modes(self, prefix: str, mode: str):
+    self._set_range_value_input_mode(f"{prefix}_start", mode)
+    self._set_range_value_input_mode(f"{prefix}_end", mode)
+
+
+def _get_preview_frame_width(self) -> int:
+    try:
+        value = int(float(str(self.preview_frame_width_var.get()).replace(",", ".")))
+    except Exception:
+        value = 3
+    return max(1, min(50, value))
+
+
+def _get_preview_frame_alpha(self) -> float:
+    try:
+        value = float(str(self.preview_frame_alpha_var.get()).replace(",", "."))
+    except Exception:
+        value = 100.0
+    return max(0.0, min(100.0, value)) / 100.0
+
+
+def _on_preview_frame_options_changed(self, *_args):
+    # Ungültige Zwischeneingaben während des Tippens nicht erzwingen; beim Rendern
+    # werden die Werte nochmals sauber begrenzt.
+    try:
+        self.update_precrop_preview()
+    except Exception:
+        pass
+
+
+def _draw_crop_frame_on_pil_image(self, img, box_y: float, box_h: float, scale_y: float):
+    if ImageDraw is None:
+        return img
+    alpha = self._get_preview_frame_alpha()
+    width = self._get_preview_frame_width()
+    if alpha <= 0:
+        return img
+    base = img.convert("RGBA")
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    y1 = max(0, int(round(box_y * scale_y)))
+    y2 = min(base.height - 1, int(round((box_y + box_h) * scale_y)))
+    color = (0, 0, 255, int(round(alpha * 255)))
+    for offset in range(width):
+        draw.rectangle((offset, y1 + offset, base.width - 1 - offset, y2 - offset), outline=color)
+    return Image.alpha_composite(base, overlay).convert("RGB")
+
+
 def _build_preview_tab(self):
     f = self.tab_preview
     f.columnconfigure(0, weight=0)
@@ -123,13 +299,43 @@ def _build_preview_tab(self):
     ttk.Radiobutton(render_preview_box, text="Frames", variable=self.preview_mode_var, value="frames", command=self.on_preview_range_mode_changed).grid(row=1, column=0, sticky="w", pady=(12, 2))
     ttk.Radiobutton(render_preview_box, text="Sekunden / Zeit", variable=self.preview_mode_var, value="time", command=self.on_preview_range_mode_changed).grid(row=2, column=0, sticky="w", pady=2)
     ttk.Label(render_preview_box, text="Start").grid(row=1, column=1, sticky="w")
-    ttk.Entry(render_preview_box, textvariable=self.preview_start_var, width=18).grid(row=2, column=1, sticky="ew", padx=(0, 8))
+    self._build_range_value_input(render_preview_box, self.preview_start_var, "preview_start").grid(row=2, column=1, sticky="ew", padx=(0, 8))
     ttk.Label(render_preview_box, text="Ende").grid(row=1, column=2, sticky="w")
-    ttk.Entry(render_preview_box, textvariable=self.preview_end_var, width=18).grid(row=2, column=2, sticky="ew")
+    self._build_range_value_input(render_preview_box, self.preview_end_var, "preview_end").grid(row=2, column=2, sticky="ew")
     ttk.Button(render_preview_box, text="Zum Start springen", command=lambda: self.jump_preview_to_range_value(self.preview_start_var, self.preview_mode_var)).grid(row=3, column=1, sticky="ew", padx=(0, 8), pady=(8, 0))
     ttk.Button(render_preview_box, text="Zum Ende springen", command=lambda: self.jump_preview_to_range_value(self.preview_end_var, self.preview_mode_var)).grid(row=3, column=2, sticky="ew", pady=(8, 0))
-    ttk.Button(render_preview_box, text="Vorschau erstellen", style="Big.TButton", command=self.run_preview).grid(row=4, column=0, columnspan=3, sticky="ew", pady=(18, 0))
-    ttk.Label(render_preview_box, text="Zeitangaben: z.B. 125, 00:02:05 oder 00:02:05.500", style="Subtitle.TLabel").grid(row=5, column=0, columnspan=3, sticky="w", pady=(10, 0))
+    ttk.Label(render_preview_box, text="Zeitangaben: z.B. 125, 00:02:05 oder 00:02:05.500", style="Subtitle.TLabel").grid(row=4, column=0, columnspan=3, sticky="w", pady=(10, 0))
+
+    frame_preview_box = ttk.LabelFrame(render_preview_box, text="Rahmen-Preview", padding=8)
+    frame_preview_box.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+    frame_preview_box.columnconfigure(1, weight=1)
+    ttk.Checkbutton(
+        frame_preview_box,
+        text="Preview als volles Vorschnitt-Bild mit beweglichem blauem 16:9-Rahmen erstellen",
+        variable=self.preview_frame_preview_var,
+        command=self.update_precrop_preview,
+    ).grid(row=0, column=0, columnspan=4, sticky="w")
+    ttk.Label(frame_preview_box, text="Rahmenbreite").grid(row=1, column=0, sticky="w", pady=(8, 0))
+    width_spin = ttk.Spinbox(frame_preview_box, from_=1, to=50, increment=1, textvariable=self.preview_frame_width_var, width=6, command=self.update_precrop_preview)
+    width_spin.grid(row=1, column=1, sticky="w", padx=(8, 12), pady=(8, 0))
+    ttk.Label(frame_preview_box, text="Deckkraft %").grid(row=1, column=2, sticky="w", pady=(8, 0))
+    alpha_spin = ttk.Spinbox(frame_preview_box, from_=0, to=100, increment=5, textvariable=self.preview_frame_alpha_var, width=6, command=self.update_precrop_preview)
+    alpha_spin.grid(row=1, column=3, sticky="w", padx=(8, 0), pady=(8, 0))
+    ttk.Label(
+        frame_preview_box,
+        text="Ohne Haken bleibt die Vorschau-MP4 wie bisher. Die Rahmen-Einstellungen wirken auch auf die Anzeige rechts.",
+        style="Subtitle.TLabel",
+        wraplength=290,
+    ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(8, 0))
+    for widget in (width_spin, alpha_spin):
+        widget.bind("<FocusOut>", self._on_preview_frame_options_changed)
+        widget.bind("<Return>", self._on_preview_frame_options_changed)
+    self.preview_frame_width_var.trace_add("write", self._on_preview_frame_options_changed)
+    self.preview_frame_alpha_var.trace_add("write", self._on_preview_frame_options_changed)
+
+    ttk.Button(render_preview_box, text="Vorschau erstellen", style="Big.TButton", command=self.run_preview).grid(row=6, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+
+    self._update_range_value_input_modes("preview", self.preview_mode_var.get())
 
     self.canvas = tk.Canvas(right, width=700, height=380, bg="#222222", highlightthickness=1, highlightbackground="#777777")
     self.canvas.grid(row=0, column=0, sticky="nsew")
@@ -203,13 +409,6 @@ def update_precrop_preview(self):
         img = Image.fromarray(frame_rgb)
         cw = max(self.canvas.winfo_width(), 560)
         chh = max(self.canvas.winfo_height(), 360)
-        img.thumbnail((cw - 24, chh - 24))
-        self.preview_photo = ImageTk.PhotoImage(img)
-        self.canvas.delete("all")
-        x = (cw - img.width) // 2
-        y = (chh - img.height) // 2
-        self.canvas.create_image(x, y, anchor="nw", image=self.preview_photo)
-
         basis_w, basis_h = frame.shape[1], frame.shape[0]
         box_h = crop_height(basis_w)
 
@@ -233,13 +432,15 @@ def update_precrop_preview(self):
                 csv_note = f"CSV konnte nicht gelesen werden: {csv_exc}"
 
         box_y = crop_offsets(basis_w, basis_h)[csv_pos]
-        scale_x = img.width / basis_w
+        img.thumbnail((cw - 24, chh - 24))
         scale_y = img.height / basis_h
-        self.canvas.create_rectangle(
-            x, y + box_y * scale_y,
-            x + img.width, y + (box_y + box_h) * scale_y,
-            outline="blue", width=3
-        )
+        img = self._draw_crop_frame_on_pil_image(img, box_y, box_h, scale_y)
+        self.preview_photo = ImageTk.PhotoImage(img)
+        self.canvas.delete("all")
+        x = (cw - img.width) // 2
+        y = (chh - img.height) // 2
+        self.canvas.create_image(x, y, anchor="nw", image=self.preview_photo)
+
         # Kleiner Hinweis direkt im Bild, damit man sofort sieht,
         # ob up / center / down aus der CSV angekommen ist.
         self.canvas.create_text(
@@ -293,6 +494,7 @@ def on_preview_range_mode_changed(self):
     old_mode = getattr(self, "_preview_last_mode", new_mode)
     self._convert_range_controls(self.preview_start_var, self.preview_end_var, old_mode, new_mode)
     self._preview_last_mode = new_mode
+    self._update_range_value_input_modes("preview", new_mode)
 
 def jump_preview_to_range_value(self, value_var, mode_var):
     try:
@@ -341,5 +543,17 @@ def run_preview(self):
         if not str(preview):
             raise RuntimeError("Bitte einen Speicherort für die Vorschau wählen.")
         start, end = self._range_preview()
-        render_preview(source, csv_path, preview, start, end, self._get_precrop(), self._progress_callback, self._cancelled)
+        render_preview(
+            source,
+            csv_path,
+            preview,
+            start,
+            end,
+            self._get_precrop(),
+            self._progress_callback,
+            self._cancelled,
+            frame_preview=bool(self.preview_frame_preview_var.get()),
+            frame_width=self._get_preview_frame_width(),
+            frame_alpha=self._get_preview_frame_alpha(),
+        )
     self._run_worker("Vorschau wird gestartet ...", job)

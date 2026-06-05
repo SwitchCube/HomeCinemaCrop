@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v34 NVENC-HDR10 via MKVToolNix-Container-Metadaten
+HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v37 Vorschau-Workflow-Anordnung
 
 Workflow:
 1. Datei wählen
@@ -39,7 +39,7 @@ except Exception:
 from HomeCinemaCrop_core import *
 from tabs import file_tab, precrop_tab, preview_tab, render_tab
 
-APP_VERSION = "v34"
+APP_VERSION = "v37"
 
 TRANSLATIONS_EN = {
     'Sprache': 'Language',
@@ -113,6 +113,10 @@ class App(tk.Tk):
         self.preview_end_var = tk.StringVar()
         self.preview_mode_var = tk.StringVar(value="frames")
         self._preview_last_mode = "frames"
+        self.preview_frame_preview_var = tk.BooleanVar(value=False)
+        self.preview_frame_width_var = tk.StringVar(value="3")
+        self.preview_frame_alpha_var = tk.StringVar(value="100")
+
 
         self.render_start_var = tk.StringVar()
         self.render_end_var = tk.StringVar()

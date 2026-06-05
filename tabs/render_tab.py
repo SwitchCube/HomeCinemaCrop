@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# HomeCinemaCrop render_tab v34
+# HomeCinemaCrop render_tab v35
 
 import tkinter as tk
 from tkinter import ttk
@@ -74,8 +74,8 @@ def _build_render_tab(self):
     ttk.Radiobutton(mode_col, text="Sekunden / Zeit", variable=self.render_mode_var, value="time", command=self.on_render_range_mode_changed).pack(anchor="w")
     ttk.Label(self.render_range_controls, text="Start").grid(row=0, column=1, sticky="w", padx=(0, 8))
     ttk.Label(self.render_range_controls, text="Ende").grid(row=0, column=2, sticky="w")
-    ttk.Entry(self.render_range_controls, textvariable=self.render_start_var, width=18).grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=(2, 0))
-    ttk.Entry(self.render_range_controls, textvariable=self.render_end_var, width=18).grid(row=1, column=2, sticky="ew", pady=(2, 0))
+    self._build_range_value_input(self.render_range_controls, self.render_start_var, "render_start").grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=(2, 0))
+    self._build_range_value_input(self.render_range_controls, self.render_end_var, "render_end").grid(row=1, column=2, sticky="ew", pady=(2, 0))
     ttk.Button(self.render_range_controls, text="Wie Vorschau-Bereich", command=self.copy_preview_range_to_render).grid(row=2, column=1, columnspan=2, sticky="ew", pady=(10, 0))
     ttk.Label(range_box, text="Ohne Haken wird der komplette Film gerendert. Zeitangaben: 125, 00:02:05 oder 00:02:05.500", style="Subtitle.TLabel").grid(row=2, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
@@ -131,6 +131,7 @@ def _build_render_tab(self):
     _build_filter_box(self, right)
     _build_start_box(self, right)
 
+    self._update_range_value_input_modes("render", self.render_mode_var.get())
     self.on_render_limited_changed()
     self.on_size_options_changed()
     self.on_filter_options_changed()
@@ -384,6 +385,7 @@ def on_render_limited_changed(self):
     if not enabled:
         self.render_start_var.set("")
         self.render_end_var.set("")
+    self._update_range_value_input_modes("render", self.render_mode_var.get())
 
 
 def copy_preview_range_to_render(self):
@@ -401,6 +403,7 @@ def on_render_range_mode_changed(self):
     old_mode = getattr(self, "_render_last_mode", new_mode)
     self._convert_range_controls(self.render_start_var, self.render_end_var, old_mode, new_mode)
     self._render_last_mode = new_mode
+    self._update_range_value_input_modes("render", new_mode)
 
 
 def _range_render(self):

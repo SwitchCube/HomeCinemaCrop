@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v34 NVENC-HDR10 via MKVToolNix-Container-Metadaten
+HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v36 Rahmen-Preview für Vorschau-MP4
 
 Workflow:
 1. Datei wählen
@@ -577,9 +577,48 @@ def create_center_csv(source: Path, csv_out: Path, progress, cancelled):
     progress(total, total, f"CSV gespeichert: {csv_out}")
 
 
-def render_preview(source: Path, csv_path: Path, out: Path, start: Optional[int], end: Optional[int], precrop: PreCrop, progress, cancelled):
+
+def _safe_int(value, default: int, min_value: int, max_value: int) -> int:
+    try:
+        number = int(float(str(value).replace(",", ".")))
+    except Exception:
+        number = default
+    return max(min_value, min(max_value, number))
+
+
+def _safe_float(value, default: float, min_value: float, max_value: float) -> float:
+    try:
+        number = float(str(value).replace(",", "."))
+    except Exception:
+        number = default
+    return max(min_value, min(max_value, number))
+
+
+def draw_crop_frame_on_cv2_image(frame, box_y: int, box_h: int, line_width: int = 3, alpha: float = 1.0):
+    """Zeichnet den beweglichen 16:9-Rahmen für die Vorschau direkt ins Bild.
+
+    Wird nur für die neue Rahmen-Preview verwendet. Der finale Render bleibt davon
+    unberührt.
+    """
+    h, w = frame.shape[:2]
+    line_width = _safe_int(line_width, 3, 1, 50)
+    alpha = _safe_float(alpha, 1.0, 0.0, 1.0)
+    x1, y1 = 0, max(0, int(box_y))
+    x2, y2 = max(0, w - 1), min(h - 1, int(box_y + box_h - 1))
+    if alpha <= 0:
+        return frame
+    if alpha >= 0.999:
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), line_width)
+        return frame
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (x1, y1), (x2, y2), (255, 0, 0), line_width)
+    cv2.addWeighted(overlay, alpha, frame, 1.0 - alpha, 0, dst=frame)
+    return frame
+
+
+def render_preview(source: Path, csv_path: Path, out: Path, start: Optional[int], end: Optional[int], precrop: PreCrop, progress, cancelled, frame_preview: bool = False, frame_width: int = 3, frame_alpha: float = 1.0):
     info = get_video_info(source)
-    base_w, _ = size_after_precrop(info.width, info.height, precrop)
+    base_w, base_h = size_after_precrop(info.width, info.height, precrop)
     states = read_csv(csv_path)
     total_csv_frames = len(states)
     start = 1 if start is None else start
@@ -595,12 +634,15 @@ def render_preview(source: Path, csv_path: Path, out: Path, start: Optional[int]
         raise RuntimeError(f"Quelle kann nicht geöffnet werden: {source}")
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_zero)
     h = crop_height(base_w)
-    writer = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"mp4v"), info.fps, (base_w, h))
+    writer_size = (base_w, base_h) if frame_preview else (base_w, h)
+    writer = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"mp4v"), info.fps, writer_size)
     if not writer.isOpened():
         raise RuntimeError(f"Vorschau-Ausgabe kann nicht geöffnet werden: {out}")
     total_preview_frames = end_zero - start_zero + 1
     current_zero = start_zero
     written = 0
+    frame_width = _safe_int(frame_width, 3, 1, 50)
+    frame_alpha = _safe_float(frame_alpha, 1.0, 0.0, 1.0)
     while current_zero <= end_zero:
         if cancelled():
             raise Cancelled()
@@ -609,10 +651,18 @@ def render_preview(source: Path, csv_path: Path, out: Path, start: Optional[int]
             break
         pos = INDEX_TO_POSITION[int(states[current_zero])]
         frame = apply_precrop_to_frame(frame, precrop)
-        cropped = crop_frame(frame, pos)
-        cv2.putText(cropped, f"Frame {current_zero + 1}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-        cv2.putText(cropped, pos, (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-        writer.write(cropped)
+        if frame_preview:
+            # Rahmen-Preview: komplettes Bild nach Vorschnitt ausgeben und den
+            # beweglichen 16:9-Ausschnitt aus der CSV als blauen Rahmen einbrennen.
+            box_y = crop_offsets(base_w, base_h)[pos]
+            output_frame = frame.copy()
+            draw_crop_frame_on_cv2_image(output_frame, box_y, h, frame_width, frame_alpha)
+        else:
+            # Normale Vorschau bleibt unverändert: nur den fertigen 16:9-Ausschnitt ausgeben.
+            output_frame = crop_frame(frame, pos)
+        cv2.putText(output_frame, f"Frame {current_zero + 1}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        cv2.putText(output_frame, pos, (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        writer.write(output_frame)
         current_zero += 1
         written += 1
         if written % 10 == 0 or written == total_preview_frames:
