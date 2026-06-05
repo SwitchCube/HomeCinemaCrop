@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v38 CSV-Zwischenpositionen
+HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v40 Audio- und Untertitel-Spurauswahl
 
 Workflow:
 1. Datei wählen
@@ -84,6 +84,19 @@ class VideoInfo:
 
 
 @dataclasses.dataclass
+class MediaStreamInfo:
+    index: int
+    codec_type: str
+    codec_name: str = ""
+    language: str = ""
+    title: str = ""
+    channels: Optional[int] = None
+    channel_layout: str = ""
+    forced: bool = False
+    default: bool = False
+
+
+@dataclasses.dataclass
 class PreCrop:
     left: int = 0
     right: int = 0
@@ -150,6 +163,8 @@ class EncoderSettings:
     copy_metadata: bool = True
     copy_chapters: bool = True
     copy_attachments: bool = True
+    selected_audio_stream_indices: Optional[tuple[int, ...]] = None
+    selected_subtitle_stream_indices: Optional[tuple[int, ...]] = None
     x265_extra_params: str = ""
     ffmpeg_extra_args: str = ""
 
@@ -303,6 +318,36 @@ def get_video_info(path: Path) -> VideoInfo:
                 hdr_max_cll=hdr_max_cll,
             )
     raise RuntimeError("Kein Videostream gefunden.")
+
+
+def _stream_to_media_info(stream: dict) -> MediaStreamInfo:
+    tags = stream.get("tags") or {}
+    disposition = stream.get("disposition") or {}
+    return MediaStreamInfo(
+        index=int(stream.get("index", 0)),
+        codec_type=str(stream.get("codec_type") or ""),
+        codec_name=str(stream.get("codec_name") or ""),
+        language=str(tags.get("language") or tags.get("LANGUAGE") or "und"),
+        title=str(tags.get("title") or tags.get("TITLE") or ""),
+        channels=stream.get("channels"),
+        channel_layout=str(stream.get("channel_layout") or ""),
+        forced=bool(disposition.get("forced")),
+        default=bool(disposition.get("default")),
+    )
+
+
+def get_media_streams(path: Path) -> tuple[list[MediaStreamInfo], list[MediaStreamInfo]]:
+    """Liest kopierbare Audio- und Untertitelspuren für die Auswahl im Audio-Tab aus."""
+    meta = ffprobe_json(path)
+    audio: list[MediaStreamInfo] = []
+    subtitles: list[MediaStreamInfo] = []
+    for stream in meta.get("streams", []):
+        codec_type = stream.get("codec_type")
+        if codec_type == "audio":
+            audio.append(_stream_to_media_info(stream))
+        elif codec_type == "subtitle":
+            subtitles.append(_stream_to_media_info(stream))
+    return audio, subtitles
 
 
 
@@ -979,8 +1024,12 @@ def render_final(source: Path, csv_path: Path, output: Path, settings: EncoderSe
 
     if settings.copy_metadata:
         cmd += ["-map_metadata", "0"]
+    else:
+        cmd += ["-map_metadata", "-1"]
     if settings.copy_chapters:
         cmd += ["-map_chapters", "0"]
+    else:
+        cmd += ["-map_chapters", "-1"]
 
     encoder_label = settings.video_encoder
     encoder_map = {
@@ -1000,7 +1049,14 @@ def render_final(source: Path, csv_path: Path, output: Path, settings: EncoderSe
     if nvenc_hdr10_mkv_remux:
         ffmpeg_output_path = output.with_name(output.stem + "_ffmpeg_tmp" + output.suffix)
 
-    cmd += ["-map", "0", "-c:v", selected_codec]
+    cmd += ["-map", "0:v:0"]
+    for stream_index in settings.selected_audio_stream_indices or ():
+        cmd += ["-map", f"0:{int(stream_index)}"]
+    for stream_index in settings.selected_subtitle_stream_indices or ():
+        cmd += ["-map", f"0:{int(stream_index)}"]
+    if settings.copy_attachments:
+        cmd += ["-map", "0:t?"]
+    cmd += ["-c:v", selected_codec]
 
     pix_fmt = choose_pix_fmt(info, settings)
     if "10-bit" in encoder_label and pix_fmt not in {"yuv420p10le", "p010le"}:

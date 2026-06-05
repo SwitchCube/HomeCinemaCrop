@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# HomeCinemaCrop file_tab v40
+
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
@@ -44,6 +46,8 @@ def pick_video(self):
         self.source_var.set(path)
         self._autofill_outputs(Path(path))
         self.load_video_info()
+        if hasattr(self, "refresh_media_tracks"):
+            self.refresh_media_tracks()
         self.update_precrop_preview()
         self._update_project_state()
 

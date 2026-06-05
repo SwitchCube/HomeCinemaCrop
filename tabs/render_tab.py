@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# HomeCinemaCrop render_tab v35
+# HomeCinemaCrop render_tab v40
 
 import tkinter as tk
 from tkinter import ttk
@@ -222,16 +222,14 @@ def _build_start_box(self, parent):
     start_box = ttk.LabelFrame(parent, text="Start", padding=8)
     start_box.grid(row=1, column=0, sticky="ew")
     start_box.columnconfigure(1, weight=1)
-    ttk.Checkbutton(start_box, text="Metadaten übernehmen (-map_metadata 0)", variable=self.copy_metadata_var).grid(row=0, column=0, columnspan=2, sticky="w")
-    ttk.Checkbutton(start_box, text="Kapitel übernehmen (-map_chapters 0)", variable=self.copy_chapters_var).grid(row=1, column=0, columnspan=2, sticky="w")
-    ttk.Checkbutton(start_box, text="Anhänge/Fonts übernehmen (-c:t copy)", variable=self.copy_attachments_var).grid(row=2, column=0, columnspan=2, sticky="w")
-    ttk.Label(start_box, text="Pixelformat").grid(row=3, column=0, sticky="w", padx=(0, 8), pady=(10, 0))
-    ttk.Combobox(start_box, textvariable=self.pixel_format_mode_var, state="readonly", values=["Auto / Quelle", "Quelle exakt", "10 Bit 4:2:0 (HDR/UHD)", "8 Bit 4:2:0 (SDR)"]).grid(row=3, column=1, sticky="ew", pady=(10, 0))
-    ttk.Label(start_box, text="x265 Zusatzparameter").grid(row=4, column=0, sticky="w", pady=(10, 0))
-    ttk.Entry(start_box, textvariable=self.x265_extra_params_var).grid(row=4, column=1, sticky="ew", pady=(10, 0))
-    ttk.Label(start_box, text="FFmpeg Zusatzargumente").grid(row=5, column=0, sticky="w", pady=(10, 0))
-    ttk.Entry(start_box, textvariable=self.ffmpeg_extra_args_var).grid(row=5, column=1, sticky="ew", pady=(10, 0))
-    ttk.Button(start_box, text="Final-Render starten", style="Big.TButton", command=self.run_render).grid(row=6, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+    ttk.Checkbutton(start_box, text="Anhänge/Fonts übernehmen (-c:t copy)", variable=self.copy_attachments_var).grid(row=0, column=0, columnspan=2, sticky="w")
+    ttk.Label(start_box, text="Pixelformat").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(10, 0))
+    ttk.Combobox(start_box, textvariable=self.pixel_format_mode_var, state="readonly", values=["Auto / Quelle", "Quelle exakt", "10 Bit 4:2:0 (HDR/UHD)", "8 Bit 4:2:0 (SDR)"]).grid(row=1, column=1, sticky="ew", pady=(10, 0))
+    ttk.Label(start_box, text="x265 Zusatzparameter").grid(row=2, column=0, sticky="w", pady=(10, 0))
+    ttk.Entry(start_box, textvariable=self.x265_extra_params_var).grid(row=2, column=1, sticky="ew", pady=(10, 0))
+    ttk.Label(start_box, text="FFmpeg Zusatzargumente").grid(row=3, column=0, sticky="w", pady=(10, 0))
+    ttk.Entry(start_box, textvariable=self.ffmpeg_extra_args_var).grid(row=3, column=1, sticky="ew", pady=(10, 0))
+    ttk.Button(start_box, text="Final-Render starten", style="Big.TButton", command=self.run_render).grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
 
 def on_quality_preset_changed(self):
@@ -371,6 +369,8 @@ def _collect_encoder_settings(self) -> EncoderSettings:
         copy_metadata=bool(self.copy_metadata_var.get()),
         copy_chapters=bool(self.copy_chapters_var.get()),
         copy_attachments=bool(self.copy_attachments_var.get()),
+        selected_audio_stream_indices=self.get_selected_audio_stream_indices() if hasattr(self, "get_selected_audio_stream_indices") else None,
+        selected_subtitle_stream_indices=self.get_selected_subtitle_stream_indices() if hasattr(self, "get_selected_subtitle_stream_indices") else None,
         x265_extra_params=self.x265_extra_params_var.get(),
         ffmpeg_extra_args=self.ffmpeg_extra_args_var.get(),
     )

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v39 Preview-Frame-Schritte per Buttons und Pfeiltasten
+HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v40 Audio- und Untertitel-Spurauswahl
 
 Workflow:
 1. Datei wählen
@@ -37,9 +37,9 @@ except Exception:
     ImageTk = None
 
 from HomeCinemaCrop_core import *
-from tabs import file_tab, precrop_tab, preview_tab, render_tab
+from tabs import file_tab, precrop_tab, preview_tab, audio_tab, render_tab
 
-APP_VERSION = "v39"
+APP_VERSION = "v40"
 
 TRANSLATIONS_EN = {
     'Sprache': 'Language',
@@ -47,6 +47,7 @@ TRANSLATIONS_EN = {
     'Datei': 'File',
     'Vorschnitt': 'Pre-crop',
     'Vorschau': 'Preview',
+    'Audio': 'Audio',
     'Final-Render': 'Final render',
     'Status / Protokoll': 'Status / log',
     'Bereit.': 'Ready.',
@@ -177,6 +178,12 @@ class App(tk.Tk):
         self.copy_metadata_var = tk.BooleanVar(value=True)
         self.copy_chapters_var = tk.BooleanVar(value=True)
         self.copy_attachments_var = tk.BooleanVar(value=True)
+        self.media_audio_streams = []
+        self.media_subtitle_streams = []
+        self.audio_track_vars = {}
+        self.subtitle_track_vars = {}
+        self.audio_track_status_var = tk.StringVar(value="Noch keine Quelle geladen.")
+        self.subtitle_track_status_var = tk.StringVar(value="Noch keine Quelle geladen.")
         self.x265_extra_params_var = tk.StringVar(value="")
         self.ffmpeg_extra_args_var = tk.StringVar(value="")
 
@@ -248,14 +255,17 @@ class App(tk.Tk):
         self.tab_file = ttk.Frame(self.nb, padding=8)
         self.tab_precrop = ttk.Frame(self.nb, padding=8)
         self.tab_preview = ttk.Frame(self.nb, padding=8)
+        self.tab_audio = ttk.Frame(self.nb, padding=8)
         self.tab_render = ttk.Frame(self.nb, padding=8)
         self.nb.add(self.tab_file, text=self._t("Datei"))
         self.nb.add(self.tab_precrop, text=self._t("Vorschnitt"))
         self.nb.add(self.tab_preview, text=self._t("Vorschau"))
+        self.nb.add(self.tab_audio, text=self._t("Audio"))
         self.nb.add(self.tab_render, text=self._t("Final-Render"))
         self._build_file_tab()
         self._build_precrop_tab()
         self._build_preview_tab()
+        self._build_audio_tab()
         self._build_render_tab()
 
         status = ttk.LabelFrame(root, text=self._t("Status / Protokoll"), padding=6)
@@ -287,6 +297,7 @@ class App(tk.Tk):
         self.nb.tab(self.tab_precrop, state="normal" if source_ok else "disabled")
         state_after_csv = "normal" if (source_ok and csv_ok) else "disabled"
         self.nb.tab(self.tab_preview, state=state_after_csv)
+        self.nb.tab(self.tab_audio, state="normal" if source_ok else "disabled")
         self.nb.tab(self.tab_render, state=state_after_csv)
 
     def _paths(self):
@@ -454,7 +465,7 @@ class App(tk.Tk):
 
 # Nur explizit gewünschte Tab-Module installieren.
 # Dadurch kann kein alter eingebauter Tab-Code mehr angezeigt werden.
-for module in (file_tab, precrop_tab, preview_tab, render_tab):
+for module in (file_tab, precrop_tab, preview_tab, audio_tab, render_tab):
     for name, value in module.__dict__.items():
         if callable(value) and not name.startswith("__"):
             setattr(App, name, value)
