@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v37 Vorschau-Workflow-Anordnung
+HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v39 Preview-Frame-Schritte per Buttons und Pfeiltasten
 
 Workflow:
 1. Datei wählen
@@ -39,7 +39,7 @@ except Exception:
 from HomeCinemaCrop_core import *
 from tabs import file_tab, precrop_tab, preview_tab, render_tab
 
-APP_VERSION = "v37"
+APP_VERSION = "v39"
 
 TRANSLATIONS_EN = {
     'Sprache': 'Language',

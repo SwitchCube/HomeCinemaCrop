@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v36 Rahmen-Preview für Vorschau-MP4
+HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v38 CSV-Zwischenpositionen
 
 Workflow:
 1. Datei wählen
@@ -64,7 +64,7 @@ def format_command_for_log(cmd: list[str]) -> str:
         return " ".join(str(part) for part in cmd)
 
 
-POSITIONS = ("up", "center", "down")
+POSITIONS = ("up", "half-up", "center", "half-down", "down")
 POSITION_TO_INDEX = {name: index for index, name in enumerate(POSITIONS)}
 INDEX_TO_POSITION = {index: name for index, name in enumerate(POSITIONS)}
 
@@ -462,7 +462,15 @@ def crop_height(width: int) -> int:
 def crop_offsets(width: int, height: int):
     ch = crop_height(width)
     slack = height - ch
-    return {"up": 0, "center": slack // 2, "down": slack}
+    # Fünf feste CSV-Positionen von oben nach unten.
+    # half-up liegt genau zwischen up und center, half-down zwischen center und down.
+    return {
+        "up": 0,
+        "half-up": int(round(slack * 0.25)),
+        "center": int(round(slack * 0.50)),
+        "half-down": int(round(slack * 0.75)),
+        "down": slack,
+    }
 
 
 def normalize_precrop(left=0, right=0, top=0, bottom=0) -> PreCrop:
@@ -527,7 +535,7 @@ def read_csv(path: Path):
             if frame_number != expected_frame:
                 raise RuntimeError(f"Frames müssen lückenlos aufsteigend sein. Zeile {row_index}: gefunden {frame_number}, erwartet {expected_frame}")
             if pos_text not in POSITION_TO_INDEX:
-                raise RuntimeError(f"Ungültige Position in Zeile {row_index}: {pos_text}. Erlaubt: up, center, down")
+                raise RuntimeError(f"Ungültige Position in Zeile {row_index}: {pos_text}. Erlaubt: up, half-up, center, half-down, down")
             states.append(POSITION_TO_INDEX[pos_text])
             expected_frame += 1
     if not states:

@@ -77,6 +77,30 @@ def jump_precrop_preview_frame(self, delta: int):
     self.precrop_preview_custom_frame_var.set(str(new_value))
     self.update_precrop_preview()
 
+def _preview_arrow_key_step(self, delta: int):
+    """Frame-Vorschau per Tastatur einen Frame vor/zurück bewegen.
+
+    Aktiv nur im Vorschau-Tab. In Text-/Zahlenfeldern bleiben die Pfeiltasten
+    normal nutzbar, damit Eingaben nicht gestört werden.
+    """
+    try:
+        if self.nb.select() != str(self.tab_preview):
+            return
+        focus = self.focus_get()
+        widget_class = focus.winfo_class() if focus is not None else ""
+        if widget_class in {"Entry", "TEntry", "Spinbox", "TSpinbox", "Text"}:
+            return
+        self.jump_precrop_preview_frame(delta)
+    except Exception:
+        return
+
+def _install_preview_keyboard_bindings(self):
+    if getattr(self, "_preview_keyboard_bindings_installed", False):
+        return
+    self._preview_keyboard_bindings_installed = True
+    self.bind_all("<Left>", lambda _event: self._preview_arrow_key_step(-1), add="+")
+    self.bind_all("<Right>", lambda _event: self._preview_arrow_key_step(1), add="+")
+
 
 def _time_parts_from_range_value(self, value: str) -> tuple[int, int, int]:
     value = (value or "").strip().replace(",", ".")
@@ -281,16 +305,21 @@ def _build_preview_tab(self):
     frame_entry.bind("<Button-1>", lambda _event: self.precrop_preview_mode_var.set("frame"))
     frame_entry.bind("<Return>", lambda _event: (self._preview_frame_entry_changed(), self.update_precrop_preview()))
     frame_entry.bind("<FocusOut>", self._preview_frame_entry_changed)
-    ttk.Button(control, text="-100", command=lambda: self.jump_precrop_preview_frame(-100)).grid(row=2, column=2, sticky="ew", padx=(0, 4), pady=(6, 2))
-    ttk.Button(control, text="+100", command=lambda: self.jump_precrop_preview_frame(100)).grid(row=2, column=3, sticky="ew", pady=(6, 2))
+    ttk.Button(control, text="-1", command=lambda: self.jump_precrop_preview_frame(-1)).grid(row=2, column=2, sticky="ew", padx=(0, 4), pady=(6, 2))
+    ttk.Button(control, text="+1", command=lambda: self.jump_precrop_preview_frame(1)).grid(row=2, column=3, sticky="ew", pady=(6, 2))
 
     small = ttk.Frame(control)
     small.grid(row=3, column=1, columnspan=3, sticky="ew", pady=(2, 0))
-    ttk.Button(small, text="-1000", command=lambda: self.jump_precrop_preview_frame(-1000)).pack(side="left", fill="x", expand=True, padx=(0, 4))
-    ttk.Button(small, text="+1000", command=lambda: self.jump_precrop_preview_frame(1000)).pack(side="left", fill="x", expand=True)
+    ttk.Button(small, text="-100", command=lambda: self.jump_precrop_preview_frame(-100)).pack(side="left", fill="x", expand=True, padx=(0, 4))
+    ttk.Button(small, text="+100", command=lambda: self.jump_precrop_preview_frame(100)).pack(side="left", fill="x", expand=True)
 
-    ttk.Button(control, text="Bildvorschau aktualisieren", command=self.update_precrop_preview).grid(row=4, column=0, columnspan=4, sticky="ew", pady=(8, 0))
-    ttk.Label(control, text="Standard: 25%. Alternativ kannst du direkt eine Frame-Nummer eingeben.", style="Subtitle.TLabel").grid(row=5, column=0, columnspan=4, sticky="w", pady=(6, 0))
+    large = ttk.Frame(control)
+    large.grid(row=4, column=1, columnspan=3, sticky="ew", pady=(2, 0))
+    ttk.Button(large, text="-1000", command=lambda: self.jump_precrop_preview_frame(-1000)).pack(side="left", fill="x", expand=True, padx=(0, 4))
+    ttk.Button(large, text="+1000", command=lambda: self.jump_precrop_preview_frame(1000)).pack(side="left", fill="x", expand=True)
+
+    ttk.Button(control, text="Bildvorschau aktualisieren", command=self.update_precrop_preview).grid(row=5, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+    ttk.Label(control, text="Standard: 25%. Pfeiltasten links/rechts springen je 1 Frame, wenn kein Eingabefeld aktiv ist.", style="Subtitle.TLabel").grid(row=6, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
     render_preview_box = ttk.LabelFrame(left, text="Vorschau-MP4 erstellen", padding=10)
     render_preview_box.grid(row=1, column=0, sticky="ew")
@@ -340,7 +369,8 @@ def _build_preview_tab(self):
     self.canvas = tk.Canvas(right, width=700, height=380, bg="#222222", highlightthickness=1, highlightbackground="#777777")
     self.canvas.grid(row=0, column=0, sticky="nsew")
     ttk.Label(right, textvariable=self.precrop_preview_frame_info_var, style="Subtitle.TLabel").grid(row=1, column=0, sticky="w", pady=(8, 0))
-    ttk.Label(right, text="Die Vorschau zeigt den eingestellten Ergebnisbereich. Der blaue Rahmen kommt aus der CSV-Position up/center/down.", style="Subtitle.TLabel").grid(row=2, column=0, sticky="w")
+    ttk.Label(right, text="Die Vorschau zeigt den eingestellten Ergebnisbereich. Der blaue Rahmen kommt aus der CSV-Position up/half-up/center/half-down/down.", style="Subtitle.TLabel").grid(row=2, column=0, sticky="w")
+    self._install_preview_keyboard_bindings()
 
 def update_precrop_preview(self):
     self._update_precrop_info()
