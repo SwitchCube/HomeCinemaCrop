@@ -12,7 +12,10 @@ last_ffmpeg_error.log
 last_app_error.log
 last_mkvmerge_command.txt
 last_mkvmerge_error.log
+last_csv_editor_mpv_command.txt
+last_csv_editor_mpv_error.log
 *.log
+*.txt
 
 # Automatisch erzeugte Projekt-/Ausgabedateien
 *_crop.csv
