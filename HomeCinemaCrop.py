@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v40 Audio- und Untertitel-Spurauswahl
+HomeCinemaCrop: IMAX (4:3) → 16:9 GUI v42 CSV-Editor als separates Werkzeug
 
 Workflow:
 1. Datei wählen
 2. optionaler manueller Vorschnitt wie in HandBrake (z.B. MakeMKV-16:9 -> echtes 4:3/IMAX-Bild)
-3. CSV mit up/center/down laden oder erzeugen
-4. Vorschau oder Final-Render ausgeben
+3. CSV mit up/half-up/center/half-down/down laden oder erzeugen
+4. Vorschau, CSV-Editor oder Final-Render ausgeben
 
 Wichtig ab v30:
 - Die Tab-Oberflächen werden wirklich aus dem Unterordner tabs/ geladen.
@@ -39,7 +39,7 @@ except Exception:
 from HomeCinemaCrop_core import *
 from tabs import file_tab, precrop_tab, preview_tab, audio_tab, render_tab
 
-APP_VERSION = "v40"
+APP_VERSION = "v42"
 
 TRANSLATIONS_EN = {
     'Sprache': 'Language',

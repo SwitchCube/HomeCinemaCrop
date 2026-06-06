@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# HomeCinemaCrop preview_tab v37
+# HomeCinemaCrop preview_tab v41
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -14,6 +14,11 @@ except Exception:
     ImageDraw = None
 
 from HomeCinemaCrop_core import *
+
+try:
+    import csv_editor
+except Exception:
+    csv_editor = None
 
 def _get_total_frames_for_preview(self) -> int:
     if self.video_info and self.video_info.frames > 0:
@@ -274,6 +279,16 @@ def _draw_crop_frame_on_pil_image(self, img, box_y: float, box_h: float, scale_y
     return Image.alpha_composite(base, overlay).convert("RGB")
 
 
+def open_csv_editor_window(self):
+    try:
+        if csv_editor is None:
+            raise RuntimeError("csv_editor.py konnte nicht geladen werden. Bitte die Datei neben HomeCinemaCrop.py ablegen.")
+        source = Path(self.source_var.get())
+        csv_path = Path(self.csv_var.get())
+        csv_editor.open_csv_editor(self, source, csv_path, self._get_precrop())
+    except Exception as exc:
+        messagebox.showerror("CSV-Editor konnte nicht geöffnet werden", str(exc))
+
 def _build_preview_tab(self):
     f = self.tab_preview
     f.columnconfigure(0, weight=0)
@@ -319,7 +334,8 @@ def _build_preview_tab(self):
     ttk.Button(large, text="+1000", command=lambda: self.jump_precrop_preview_frame(1000)).pack(side="left", fill="x", expand=True)
 
     ttk.Button(control, text="Bildvorschau aktualisieren", command=self.update_precrop_preview).grid(row=5, column=0, columnspan=4, sticky="ew", pady=(8, 0))
-    ttk.Label(control, text="Standard: 25%. Pfeiltasten links/rechts springen je 1 Frame, wenn kein Eingabefeld aktiv ist.", style="Subtitle.TLabel").grid(row=6, column=0, columnspan=4, sticky="w", pady=(6, 0))
+    ttk.Button(control, text="CSV-Editor öffnen", style="Big.TButton", command=self.open_csv_editor_window).grid(row=6, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+    ttk.Label(control, text="Standard: 25%. Pfeiltasten links/rechts springen je 1 Frame, wenn kein Eingabefeld aktiv ist.", style="Subtitle.TLabel").grid(row=7, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
     render_preview_box = ttk.LabelFrame(left, text="Vorschau-MP4 erstellen", padding=10)
     render_preview_box.grid(row=1, column=0, sticky="ew")

@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Lokaler MPV Player
+mpv/
+
 # HomeCinemaCrop Logs
 last_ffmpeg_command.txt
 last_ffmpeg_error.log
