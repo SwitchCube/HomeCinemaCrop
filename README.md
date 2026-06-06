@@ -1,7 +1,3 @@
-from pathlib import Path
-
-content = r"""# HomeCinemaCrop
-
 HomeCinemaCrop is a Python-based GUI application designed to convert IMAX, Open Matte and 4:3 video sources into dynamic 16:9 home cinema presentations.
 
 Unlike traditional static cropping, HomeCinemaCrop uses a CSV-based workflow that allows the crop position to change throughout the movie. This makes it possible to preserve important image content while creating a constant 16:9 presentation.
